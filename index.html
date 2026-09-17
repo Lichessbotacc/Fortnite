@@ -156,8 +156,8 @@ canvas{display:block;touch-action:none}
 
 /* screens */
 #overlay{pointer-events:auto;background:linear-gradient(160deg,#080c11,#101a24 60%,#1a1230);
-  display:flex;align-items:center;justify-content:center}
-.card{width:min(880px,92vw);max-height:92vh;overflow:auto;padding:38px 42px}
+  display:flex;align-items:center;justify-content:center;touch-action:pan-y;overflow:auto}
+.card{width:min(880px,92vw);max-height:92vh;overflow:auto;padding:38px 42px;touch-action:pan-y;-webkit-overflow-scrolling:touch}
 h1{font-size:clamp(42px,7vw,86px);margin:0;line-height:.88;font-weight:900;letter-spacing:-2px}
 h1 span{display:block;font-family:'Barlow Condensed';font-weight:600;font-size:22px;letter-spacing:6px;
   color:#9ec8ff;margin-bottom:10px}
@@ -950,6 +950,25 @@ function buildTargetFor(e){
   t.key=keyFor(t.type,t.cx,t.cy,t.cz,t.axis);
   return t;
 }
+/* Absolute Bauziele — für Bots, die gezielt Wände/Boden/Dach an einer bestimmten
+   Rasterzelle setzen wollen, unabhängig davon wohin sie gerade schauen. */
+function wallTargetAt(cx,cy,cz,dir){
+  const s=wallSlot(cx,cy,cz,dir);
+  const t={type:"wall",cx:s.cx,cy:s.cy,cz:s.cz,axis:s.axis};
+  t.pos = s.axis==="x" ? new THREE.Vector3(s.cx*G,s.cy*G+G/2,s.cz*G+G/2)
+                       : new THREE.Vector3(s.cx*G+G/2,s.cy*G+G/2,s.cz*G);
+  t.rotY = s.axis==="x" ? Math.PI/2 : 0;
+  t.key = keyFor("wall",t.cx,t.cy,t.cz,t.axis);
+  return t;
+}
+function floorTargetAt(cx,cy,cz){
+  const t={type:"floor",cx:cx,cy:cy,cz:cz,pos:new THREE.Vector3(cx*G+G/2,cy*G,cz*G+G/2),rotY:0};
+  t.key=keyFor("floor",cx,cy,cz); return t;
+}
+function roofTargetAt(cx,cy,cz){
+  const t={type:"roof",cx:cx,cy:cy,cz:cz,pos:new THREE.Vector3(cx*G+G/2,cy*G,cz*G+G/2),rotY:0};
+  t.key=keyFor("roof",cx,cy,cz); return t;
+}
 /* Stützlogik: Bodenhöhe, bestehende Bauteile oder Weltgeometrie */
 function hasSupport(t){
   if(t.cy<=0)return true;                                   // auf Bodenhöhe
@@ -1526,7 +1545,8 @@ function spawnBots(n){
       aimYaw:0, aimPitch:0, fireT:0, strafe:Math.random()<.5?1:-1, strafeT:0,
       goal:new THREE.Vector3(), goalT:0, lootGoal:null, lootT:rnd(0,1.2),
       buildCD:rnd(1,4), rampT:0, harvest:null, harvestT:0, stuck:0, jumpCD:0,
-      panic:0, retreat:0, chatT:rnd(20,90)
+      panic:0, retreat:0, chatT:rnd(20,90),
+      turtle:null, turtleCD:rnd(2,7)
     };
     // Startwaffe je nach Skill
     if(Math.random()<.35) b.slots[1]=makeWeapon(pick(WEAPONS.filter(w=>w.cls<=2)),0);
@@ -2064,6 +2084,60 @@ function botHarvest(b,dt){
   if(b.cool<=0)harvestSwing(b,new THREE.Vector3(cx,b.pos.y+1.2,cz));
   return true;
 }
+/* ---------- Baubattle: Turm hochziehen und sich einmauern ----------
+   Zustände: walls -> floor -> up -> (zurück zu walls, bis maxLevel) -> roof -> done.
+   Im Zustand "done" verschanzt sich der Bot, heilt sich und wartet — bis eine
+   Wand zerstört wird (dann bekommt er wieder Sichtkontakt) oder die Zeit abläuft. */
+function botTurtleStep(b,dt){
+  b.moveDir=new THREE.Vector3(); b.speed=0; b.aiming=false;
+  const cy=b.turtle.level;
+  const base=cellOf(b.pos.x,b.pos.y,b.pos.z);
+  const cxC=base.cx*G+G/2, czC=base.cz*G+G/2;
+  // auf der Kachelmitte bleiben, während gebaut/gestiegen wird
+  const toC=new THREE.Vector3(cxC-b.pos.x,0,czC-b.pos.z);
+  if(toC.length()>0.25){ b.moveDir=toC.normalize(); b.speed=3.2; }
+  // bevorzugt Metall, dann Stein, dann Holz
+  b.matSel = b.mats.metal>=BUILD_COST?"metal": b.mats.brick>=BUILD_COST?"brick":"wood";
+  if(b.mats[b.matSel]<BUILD_COST){ b.turtle=null; return; }   // Material alle — abbrechen
+
+  if(b.turtle.stage==="walls"){
+    const dirs=["x+","x-","z+","z-"];
+    let allThere=true;
+    for(const dir of dirs){
+      const t=wallTargetAt(base.cx,cy,base.cz,dir);
+      if(!built.has(t.key)){
+        allThere=false;
+        if(b.cool<=0){ if(placePiece(b,t))b.cool=.16; }
+        break;
+      }
+    }
+    b.building=true;
+    if(allThere) b.turtle.stage = (cy>=b.turtle.maxLevel)?"roof":"floor";
+  } else if(b.turtle.stage==="floor"){
+    const t=floorTargetAt(base.cx,cy+1,base.cz);
+    b.building=true;
+    if(built.has(t.key)) b.turtle.stage="up";
+    else if(b.cool<=0){ if(placePiece(b,t))b.cool=.16; }
+  } else if(b.turtle.stage==="up"){
+    if(b.onGround)b.vel.y=9.6;
+    if(b.pos.y>=cy*G+G-0.25){ b.turtle.level=cy+1; b.turtle.stage="walls"; }
+  } else if(b.turtle.stage==="roof"){
+    const t=roofTargetAt(base.cx,cy,base.cz);
+    b.building=true;
+    if(built.has(t.key)){ b.turtle.stage="done"; b.turtle.holdT=rnd(7,15); }
+    else if(b.cool<=0){ if(placePiece(b,t))b.cool=.16; }
+  } else if(b.turtle.stage==="done"){
+    // Verschanzt: heilen, warten, bei Sichtkontakt (Wand kaputt) wieder rausschauen
+    if(b.hp<95||b.sh<80){
+      const hi=botFindHeal(b);
+      if(hi>0&&!b.using){ b.sel=hi; startUse(b); }
+    }
+    if(b.using){ b.useT-=dt; if(b.useT<=0)finishUse(b); }
+    b.turtle.holdT-=dt;
+    const canSee = b.target&&b.target.alive&&hasLOS(b.pos,b.target.pos);
+    if(canSee||b.turtle.holdT<=0) b.turtle=null;
+  }
+}
 function updateBot(b,dt){
   if(b.state==="drop"){ botDrop(b,dt); return; }
   b.building=false;
@@ -2092,12 +2166,36 @@ function updateBot(b,dt){
   }
 
   if(inStorm){
-    // Raus aus dem Sturm — Priorität
+    // Raus aus dem Sturm — Priorität, bricht auch einen laufenden Turmbau ab
+    b.turtle=null;
     const to=new THREE.Vector3(storm.cx-b.pos.x,0,storm.cz-b.pos.z).normalize();
     b.moveDir=to; b.speed=7.2;
     b.yaw=angLerp(b.yaw,Math.atan2(-to.x,-to.z),.12);
     damage(b,Math.max(0.6,storm.dps)*dt,null);
     finishBotFrame(b,dt); return;
+  }
+
+  // Baubattle: Bots entscheiden sich, hochzubauen und sich einzumauern —
+  // klassisches "Türme bauen und drinnen bleiben" wie in alten Fortnite-Runden.
+  if(b.turtle){
+    botTurtleStep(b,dt);
+    finishBotFrame(b,dt); return;
+  }
+  if(b.turtleCD>0)b.turtleCD-=dt;
+  if(!b.turtle&&b.turtleCD<=0){
+    b.turtleCD=rnd(2.5,6);
+    const mats=b.mats.wood+b.mats.brick+b.mats.metal;
+    const dToTarget=b.target?b.pos.distanceTo(b.target.pos):999;
+    const wantsPanicBox = b.target && b.hp<42 && b.builder>0.4 && mats>=BUILD_COST*8 && dToTarget<40;
+    const wantsBoxFight = b.target && b.builder>0.55 && mats>=BUILD_COST*10 &&
+                          dToTarget>5 && dToTarget<28 && Math.random()<0.30*b.builder;
+    if(wantsPanicBox||wantsBoxFight){
+      const startCell=cellOf(b.pos.x,b.pos.y,b.pos.z);
+      b.turtle={stage:"walls",level:startCell.cy,
+        maxLevel:startCell.cy+(wantsPanicBox?ri(1,2):ri(1,3)),
+        holdT:0};
+      if(b.onGround)b.vel.y=2.0; // kurzer Hop, damit die erste Wandreihe sauber sitzt
+    }
   }
 
   if(b.target&&b.target.alive){
@@ -2336,6 +2434,7 @@ function finishBotFrame(b,dt){
    KAMERA (Third-Person, identisch für Spieler und Zuschauen)
    ====================================================================== */
 const camState={dist:4.4,shoulder:0.72};
+const CAM_MIN=1.15;       // Sicherheitsabstand: Kamera darf nie näher als das an den Kopf heran
 function applyThirdPerson(e,dt){
   const aim=e.aiming;
   const wantDist=aim?2.1:4.4;
@@ -2348,11 +2447,16 @@ function applyThirdPerson(e,dt){
   const dir=new THREE.Vector3(); camera.getWorldDirection(dir);
   const right=new THREE.Vector3(-dir.z,0,dir.x).normalize();
   const anchor=target.clone().addScaledVector(right,camState.shoulder);
-  let dist=camState.dist;
   const back=dir.clone().multiplyScalar(-1);
-  ray.set(anchor,back); ray.far=dist+0.5;
+  const wantDistClamped=Math.max(CAM_MIN,camState.dist);
+  // Kollisionscheck erst AB dem Mindestabstand starten, damit eigene/umliegende
+  // Bauten (z.B. eine Wand direkt hinter dem Rücken) die Kamera nicht bis in den
+  // Kopf hineinziehen — sie darf nur zwischen Mindest- und Wunschabstand einfahren.
+  const rayStart=anchor.clone().addScaledVector(back,CAM_MIN);
+  let dist=wantDistClamped;
+  ray.set(rayStart,back); ray.far=Math.max(0,wantDistClamped-CAM_MIN)+0.3;
   const its=ray.intersectObjects(hitMeshes,false);
-  if(its.length)dist=Math.max(0.6,its[0].distance-0.35);
+  if(its.length) dist=CAM_MIN+Math.max(0,its[0].distance-0.25);
   camera.position.copy(anchor).addScaledVector(back,dist);
   if(shake>0.001){
     const k=shake*0.16;
