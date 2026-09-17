@@ -15,8 +15,8 @@
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
-  font-family:'Archivo',system-ui,sans-serif;-webkit-user-select:none;user-select:none}
-canvas{display:block}
+  font-family:'Archivo',system-ui,sans-serif;-webkit-user-select:none;user-select:none;touch-action:none;overscroll-behavior:none}
+canvas{display:block;touch-action:none}
 #hud,#overlay{position:fixed;inset:0;pointer-events:none}
 .hidden{display:none !important}
 
@@ -93,7 +93,7 @@ canvas{display:block}
   background:rgba(200,230,255,.3);border:2px solid rgba(255,255,255,.5)}
 .tb{position:absolute;border-radius:50%;background:rgba(10,18,26,.55);border:1px solid var(--line);
   color:var(--ink);font-family:'Barlow Condensed';display:flex;align-items:center;justify-content:center;
-  text-align:center;line-height:1;pointer-events:auto;font-size:17px;padding:4px}
+  text-align:center;line-height:1;pointer-events:auto;font-size:17px;padding:4px;touch-action:none}
 .tb:active,.tb.on{background:rgba(111,208,255,.5)}
 #tFire{width:104px;height:104px;right:26px;bottom:110px;font-size:19px}
 #tJump{width:74px;height:74px;right:148px;bottom:150px}
@@ -102,7 +102,7 @@ canvas{display:block}
 #tUse{width:74px;height:74px;right:144px;bottom:62px}
 #tReload{width:62px;height:62px;right:34px;bottom:24px}
 #tMat{width:58px;height:58px;right:126px;bottom:8px}
-#tSlots{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:flex;gap:8px;pointer-events:auto}
+#tSlots{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:flex;gap:8px;pointer-events:auto;touch-action:none}
 #tSlots .tb{position:relative;width:52px;height:52px;border-radius:10px;right:auto;bottom:auto}
 #tAds{width:62px;height:62px;right:214px;bottom:96px}
 #tPause{width:46px;height:46px;left:16px;top:16px;font-size:15px}
@@ -114,6 +114,13 @@ canvas{display:block}
 #spectate .ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
 #specTop{position:fixed;top:14px;left:50%;transform:translateX(-50%);font-family:'Barlow Condensed';
   font-size:26px;background:var(--panel);border:1px solid var(--line);padding:6px 16px;z-index:4}
+
+#editBar{position:fixed;top:0;left:0;right:0;padding:16px;display:flex;gap:12px;justify-content:center;
+  align-items:center;background:linear-gradient(rgba(6,10,14,.92),transparent);z-index:8}
+#editBar span{font-family:'Barlow Condensed';font-size:19px;color:var(--dim)}
+#editBar button{padding:10px 20px;font-size:15px}
+#editBar .ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.tb.editing,#tSlots.editing{outline:2px dashed #6fd0ff;outline-offset:3px}
 
 /* screens */
 #overlay{pointer-events:auto;background:linear-gradient(160deg,#080c11,#101a24 60%,#1a1230);
@@ -193,6 +200,12 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
 </div>
 <div id="specTop" class="hidden"></div>
 
+<div id="editBar" class="hidden">
+  <span>Ziehe die Symbole an die gewünschte Stelle</span>
+  <button id="btnEditReset" class="ghost">Zurücksetzen</button>
+  <button id="btnEditDone">Fertig</button>
+</div>
+
 <div id="overlay">
   <div class="card" id="menu">
     <h1><span>OFFLINE BATTLE ROYALE</span>STURMFELD</h1>
@@ -216,6 +229,7 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
       <label>Sensitivität <input type="range" id="optSens" min="20" max="300" value="100"></label>
     </div>
     <button id="btnStart">Match starten</button>
+    <button id="btnEditControls" class="ghost" style="background:transparent;color:var(--ink);border:1px solid var(--line);margin-left:12px">Touch-Steuerung anpassen</button>
   </div>
 
   <div class="card hidden" id="endCard">
@@ -847,8 +861,7 @@ function updateBots(dt){
         if(b.far){
           // Weit entfernt: Gefecht abstrakt auswürfeln, spart Rechenleistung
           if(Math.random()<0.28*b.skill) damage(b.target,b.dmg*(b.weapon.pellets||1)*.55,b);
-          continue;
-        }
+        } else {
         const eye=new THREE.Vector3(b.pos.x,b.pos.y+1.55,b.pos.z);
         const aim=new THREE.Vector3(b.target.pos.x,b.target.pos.y+rnd(.8,1.6),b.target.pos.z);
         const sd=aim.sub(eye).normalize();
@@ -861,6 +874,7 @@ function updateBots(dt){
           fireRay(eye,p,b.dmg*(1-clamp((d-b.weapon.rng*.6)/b.weapon.rng,0,.45)),b,b.weapon.rng);
         }
         if(b.pos.distanceTo(player.pos)<70)sfx(180+Math.random()*60,.04,"sawtooth",.07*clamp(1-b.pos.distanceTo(player.pos)/70,0,1));
+        }
       }
       // Wand bauen wenn verwundet
       b.buildCD-=dt;
@@ -1002,24 +1016,83 @@ function setPaused(p){
 }
 
 /* ============ Touch (iPad / Handy) ============ */
-const TOUCH=(navigator.maxTouchPoints||0)>0&&matchMedia("(pointer:coarse)").matches;
+const TOUCH=('ontouchstart' in window)||(navigator.maxTouchPoints||0)>0||(navigator.msMaxTouchPoints||0)>0;
 const touchMove={x:0,y:0};
 let stickId=null,stickOx=0,stickOy=0,lookId=null,lookX=0,lookY=0;
-function initTouch(){
-  if(!TOUCH)return;
-  document.body.style.touchAction="none";
+let editMode=false;
+const LAYOUT_KEY="sturmfeld_touch_layout_v1";
+const DRAGGABLE_IDS=["tFire","tAds","tJump","tBuild","tPiece","tUse","tReload","tMat","tPause","tSlots"];
+function loadLayout(){ try{return JSON.parse(localStorage.getItem(LAYOUT_KEY)||"{}");}catch(e){return {};} }
+function saveLayoutEntry(id,l,t){
+  const L=loadLayout(); L[id]={l:l,t:t}; try{localStorage.setItem(LAYOUT_KEY,JSON.stringify(L));}catch(e){}
+}
+function applyTouchLayout(){
+  const L=loadLayout();
+  DRAGGABLE_IDS.forEach(id=>{
+    const n=document.getElementById(id); if(!n||!L[id])return;
+    n.style.left=L[id].l+"%"; n.style.top=L[id].t+"%"; n.style.right="auto"; n.style.bottom="auto";
+  });
+}
+function resetLayout(){
+  try{localStorage.removeItem(LAYOUT_KEY);}catch(e){}
+  DRAGGABLE_IDS.forEach(id=>{
+    const n=document.getElementById(id); if(!n)return;
+    n.style.left=""; n.style.top=""; n.style.right=""; n.style.bottom="";
+  });
+}
+function makeDraggable(n){
+  let dragging=false,offX=0,offY=0;
+  n.addEventListener("pointerdown",e=>{
+    if(!editMode)return;
+    e.preventDefault(); e.stopPropagation();
+    dragging=true; n.classList.add("editing");
+    try{n.setPointerCapture(e.pointerId);}catch(err){}
+    const r=n.getBoundingClientRect();
+    offX=e.clientX-r.left; offY=e.clientY-r.top;
+  });
+  n.addEventListener("pointermove",e=>{
+    if(!dragging)return; e.preventDefault();
+    const x=clamp(e.clientX-offX,0,innerWidth-n.offsetWidth);
+    const y=clamp(e.clientY-offY,0,innerHeight-n.offsetHeight);
+    n.style.left=x+"px"; n.style.top=y+"px"; n.style.right="auto"; n.style.bottom="auto";
+  });
+  const endDrag=e=>{
+    if(!dragging)return; dragging=false; n.classList.remove("editing");
+    const r=n.getBoundingClientRect();
+    const lp=r.left/innerWidth*100, tp=r.top/innerHeight*100;
+    n.style.left=lp+"%"; n.style.top=tp+"%";
+    saveLayoutEntry(n.id,lp,tp);
+  };
+  n.addEventListener("pointerup",endDrag);
+  n.addEventListener("pointercancel",endDrag);
+}
+function enterEditMode(){
+  document.getElementById("overlay").classList.add("hidden");
   const t=el("touch"); t.classList.remove("hidden"); t.classList.add("on");
+  applyTouchLayout();
+  editMode=true;
+  el("editBar").classList.remove("hidden");
+}
+function exitEditMode(){
+  editMode=false;
+  el("editBar").classList.add("hidden");
+  el("touch").classList.add("hidden");
+  document.getElementById("overlay").classList.remove("hidden");
+}
+function initTouch(){
+  document.body.style.touchAction="none";
+  const t=el("touch"); t.classList.add("on");
   // Slot-Knöpfe
   const sl=el("tSlots");
   for(let i=0;i<5;i++){
     const d=document.createElement("div"); d.className="tb"; d.textContent=i+1;
-    d.addEventListener("pointerdown",e=>{e.preventDefault();player.sel=i;player.build=false;player.reloading=0;updateHUD();});
+    d.addEventListener("pointerdown",e=>{e.preventDefault();if(editMode)return;player.sel=i;player.build=false;player.reloading=0;updateHUD();});
     sl.appendChild(d);
   }
   const hold=(id,down,up)=>{
     const n=el(id);
-    n.addEventListener("pointerdown",e=>{e.preventDefault();n.classList.add("on");down();});
-    ["pointerup","pointercancel","pointerleave"].forEach(ev=>n.addEventListener(ev,e=>{n.classList.remove("on");if(up)up();}));
+    n.addEventListener("pointerdown",e=>{if(editMode)return;e.preventDefault();n.classList.add("on");down();});
+    ["pointerup","pointercancel","pointerleave"].forEach(ev=>n.addEventListener(ev,e=>{if(editMode)return;n.classList.remove("on");if(up)up();}));
   };
   hold("tFire",()=>{mouseDown=true;},()=>{mouseDown=false;});
   hold("tAds",()=>{mouseRight=!mouseRight;el("tAds").classList.toggle("on",mouseRight);},null);
@@ -1033,9 +1106,13 @@ function initTouch(){
     el("tMat").textContent={wood:"Holz",brick:"Stein",metal:"Metall"}[player.matSel];updateHUD();},null);
   hold("tPause",()=>setPaused(true),null);
 
+  DRAGGABLE_IDS.forEach(id=>{ const n=document.getElementById(id); if(n)makeDraggable(n); });
+  applyTouchLayout();
+
   const st=el("stick");
   addEventListener("pointerdown",e=>{
-    if(!running||paused||e.target.closest(".tb")||e.target.closest("button"))return;
+    if(editMode||!running||paused||e.target.closest(".tb")||e.target.closest("button"))return;
+    e.preventDefault();
     if(e.clientX<innerWidth*0.45&&stickId===null){
       stickId=e.pointerId; stickOx=e.clientX; stickOy=e.clientY;
       st.style.display="block"; st.style.left=stickOx+"px"; st.style.top=stickOy+"px";
@@ -1320,7 +1397,7 @@ function startMatch(){
   spawnBots(parseInt(el("optBots").value,10));
   phase="drop"; dropGlide=false; running=true; paused=false;
   if(TOUCH){ el("touch").classList.remove("hidden");
-    el("tPiece").textContent="Wand"; el("tMat").textContent="Holz"; }
+    el("tPiece").textContent="Wand"; el("tMat").textContent="Holz"; applyTouchLayout(); }
   updateHUD(); lock();
   feed("Match gestartet - "+aliveCount()+" Spieler springen ab");
 }
@@ -1465,10 +1542,14 @@ function updatePlay(dt){
 /* ============ Start ============ */
 initGfx();
 initTouch();
+if(!TOUCH) el("btnEditControls").style.display="none";
 el("optBots").addEventListener("input",e=>el("optBotsV").textContent=e.target.value);
 el("btnStart").addEventListener("click",startMatch);
 el("btnAgain").addEventListener("click",startMatch);
 el("btnResume").addEventListener("click",()=>setPaused(false));
+el("btnEditControls").addEventListener("click",enterEditMode);
+el("btnEditDone").addEventListener("click",exitEditMode);
+el("btnEditReset").addEventListener("click",resetLayout);
 el("specNext").addEventListener("click",()=>cycleSpec(1));
 el("specPrev").addEventListener("click",()=>cycleSpec(-1));
 el("specEnd").addEventListener("click",()=>endMatch(false));
