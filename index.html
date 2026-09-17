@@ -476,7 +476,7 @@ function perfApply(){
   const L=PERF.level;
   LOWFX = (L===0);
   PERF.base = Math.min(devicePixelRatio, L>=2?1.75:L===1?1.25:1.0);
-  PERF.renderDist = L>=2?380:L===1?270:190;
+  PERF.renderDist = L>=2?480:L===1?340:240;
   PERF.botFar     = L>=2?110:L===1?80:55;
   PERF.botHide    = PERF.renderDist*0.85;
   PERF.lodStep    = L>=2?0.10:L===1?0.16:0.24;
@@ -484,7 +484,7 @@ function perfApply(){
   PERF.fxDist     = L>=2?140:L===1?95:60;
   PERF.targetMs   = 22;
   if(renderer)renderer.setPixelRatio(PERF.base*PERF.scale);
-  if(scene&&scene.fog)scene.fog.density = 2.15/PERF.renderDist;
+  if(scene&&scene.fog)scene.fog.density = 1.05/PERF.renderDist;
   if(camera){ camera.far = PERF.renderDist+220; camera.updateProjectionMatrix(); }
 }
 function perfSetMode(m){
@@ -511,7 +511,7 @@ function perfAdapt(dt){
 function initGfx(){
   scene=new THREE.Scene();
   scene.background=new THREE.Color(0xa8d2ec);
-  scene.fog=new THREE.FogExp2(0xa8d2ec,0.0021);
+  scene.fog=new THREE.FogExp2(0xcfe0ea,0.0021);
   camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.08,1400);
   renderer=new THREE.WebGLRenderer({antialias:!LOWFX,powerPreference:"high-performance",stencil:false});
   renderer.setPixelRatio(Math.min(devicePixelRatio,LOWFX?1:1.75));
@@ -1455,7 +1455,7 @@ function placePiece(e,t,silent){
   if(built.size>650){                      // ältestes Bauteil abräumen (FPS-Schutz)
     const first=built.keys().next().value;
     const old=built.get(first);
-    if(old&&old!==rec)destroyBuild(old);
+    if(old&&old!==rec)destroyBuild(old,true);
   }
   if(!silent){ if(e===player)sndBuild(mt,1); else sndBuild(mt,distVol(t.pos,70)*.8); }
   puff(t.pos,mt);
@@ -1471,34 +1471,42 @@ function damageBuild(rec,dmg){
   }
   if(rec.hp<=0)destroyBuild(rec);
 }
-function destroyBuild(rec){
+function destroyBuild(rec,quiet){
   rec.cols.forEach(c=>removeCollider(c));
   if(rec.grp.parent)rec.grp.parent.remove(rec.grp);
   built.delete(rec.key);
-  puff(rec.grp.position,rec.mat);
+  if(!quiet)puff(rec.grp.position,rec.mat);
   // Alles Unabgestützte einstürzen lassen
-  scheduleCollapse();
+  if(!quiet)scheduleCollapse();
 }
-let collapseT=0;
-function scheduleCollapse(){ collapseT=0.25; }
+let collapseT=0, collapseBusy=false, collapseCD=0;
+function scheduleCollapse(){
+  if(collapseBusy)return;            // waehrend der Pruefung nicht neu anstossen
+  if(collapseT<=0)collapseT=0.30;
+}
+/* Wichtig: diese Pruefung lief frueher bis zu 4x ueber ALLE Bauteile und hat
+   sich dabei ueber destroyBuild() endlos selbst neu gestartet — das war die
+   Ursache fuer die Standbilder. Jetzt: eine Runde, gesperrt gegen Re-Entry,
+   mit fester Pause danach. */
 function runCollapse(){
-  let changed=true,guard=0;
-  while(changed&&guard<4){
-    changed=false; guard++;
-    const list=[];
-    built.forEach(r=>list.push(r));
-    for(const r of list){
-      const t={type:r.type,cx:0,cy:0,cz:0,axis:null};
-      const p=r.key.split("|");
-      t.cx=+p[1];t.cy=+p[2];t.cz=+p[3];
-      if(r.type==="wall")t.axis=p[4];
-      // Stütze prüfen ohne sich selbst
-      built.delete(r.key);
-      const ok=hasSupport(t);
-      built.set(r.key,r);
-      if(!ok){ destroyBuild(r); changed=true; }
-    }
+  if(collapseBusy)return;
+  collapseBusy=true;
+  const list=[];
+  built.forEach(r=>list.push(r));
+  const doomed=[];
+  for(let i=0;i<list.length;i++){
+    const r=list[i];
+    const p=r.key.split("|");
+    const t={type:r.type,cx:+p[1],cy:+p[2],cz:+p[3],axis:r.type==="wall"?p[4]:null};
+    if(t.cy<=0)continue;                       // Bodenhoehe braucht keine Pruefung
+    built.delete(r.key);
+    const ok=hasSupport(t);
+    built.set(r.key,r);
+    if(!ok)doomed.push(r);
   }
+  for(let i=0;i<doomed.length;i++)destroyBuild(doomed[i],true);
+  collapseBusy=false;
+  collapseCD=0.6;
 }
 function portAFort(x,z){
   const cx=Math.floor(x/G), cz=Math.floor(z/G);
@@ -1877,7 +1885,14 @@ function spawnFloor(item,x,z,y){
     new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:.16,depthWrite:false,side:THREE.DoubleSide}));
   beam.position.y=3.2; g.add(beam); g.userData.beam=beam;
   g.position.set(x,(y||0)+0.7,z); staticAdd(g);
-  const o={mesh:g,item:item}; lootItems.push(o); return o;
+  const o={mesh:g,item:item}; lootItems.push(o);
+  if(lootItems.length>620){                     // aeltestes Teil weit weg abraeumen
+    for(let i=0;i<lootItems.length-40;i++){
+      const q=lootItems[i].mesh.position;
+      if(Math.hypot(q.x-player.pos.x,q.z-player.pos.z)>120){ removeLoot(lootItems[i]); break; }
+    }
+  }
+  return o;
 }
 function spawnGroundLoot(x,z){
   const r=Math.random();
@@ -2664,10 +2679,11 @@ function botTurtleStep(b,dt){
 /* ---------- Baubattle: hochbauen, 90er, Wand vor den Gegner ----------
    Ablauf wie im echten Fortnite-Duell: Rampe unter sich setzen, springen,
    alle zwei Stücke um 90° drehen, dazwischen eine Wand Richtung Gegner. */
+let buildFighters=0, buildFightT=0;
 function botBuildFightStep(b,dt,to){
   const S=b.buildUp;
   S.life+=dt;
-  if(S.life>20||S.fail>7||S.left<=0||!botPickMat(b,false)){
+  if(S.life>16||S.fail>6||S.left<=0||!botPickMat(b,false)||built.size>600){
     b.buildUp=null; b.buildCD=rnd(1.0,2.6); return;
   }
   const dir=new THREE.Vector3(Math.cos(S.ang),0,Math.sin(S.ang));
@@ -2699,10 +2715,8 @@ function botBuildFightStep(b,dt,to){
   } else if(S.phase==="wall"){
     // Schutzwand Richtung Gegner, bei genug Material zusaetzlich eine seitlich
     if(!botBuildPiece(b,"wall",to))S.fail++;
-    if(botMats(b)>=BUILD_COST*8){
-      const sv=new THREE.Vector3(-to.z,0,to.x);
-      botBuildPiece(b,"wall",sv);
-      if(botMats(b)>=BUILD_COST*12)botBuildPiece(b,"wall",sv.clone().multiplyScalar(-1));
+    if(botMats(b)>=BUILD_COST*10&&Math.random()<0.6){
+      botBuildPiece(b,"wall",new THREE.Vector3(-to.z,0,to.x));
     }
     b.cool=.09; S.phase="ramp";
   } else {
@@ -2913,12 +2927,13 @@ function botFight(b,dt){
   /* ---- Baubattle ---- */
   if(b.buildUp){ botBuildFightStep(b,dt,to); }
   b.buildCD-=dt;
-  if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&los&&dist>5&&dist<95&&
-     botMats(b)>=BUILD_COST*5&&(b.hurtT>0||tgt.pos.y>b.pos.y+2||Math.random()<0.9)){
+  if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&los&&dist>5&&dist<80&&
+     botMats(b)>=BUILD_COST*5&&built.size<520&&
+     (b.hurtT>0||tgt.pos.y>b.pos.y+2||Math.random()<0.7)){
     // Duell: sofort hochbauen und Höhe erkämpfen
-    b.buildUp={ang:Math.atan2(to.z,to.x)+rnd(-.3,.3),phase:"floor",left:ri(6,14),
+    b.buildUp={ang:Math.atan2(to.z,to.x)+rnd(-.3,.3),phase:"floor",left:ri(5,10),
                levels:0,fail:0,life:0,climbT:0,y0:b.pos.y,roofed:false};
-    b.buildCD=rnd(1.4,3.2);
+    b.buildCD=rnd(2.2,4.5);
   }
   if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&botPickMat(b,false)){
     const needCover = b.hurtT>0||b.reloading>0||w.inMag<=0||b.hp<55;
@@ -3251,7 +3266,7 @@ function finishBotFrame(b,dt){
   // Loot direkt unter den Fuessen einsammeln — sonst laufen Bots an Waffen vorbei
   b.grabT=(b.grabT||0)-dt;
   if(b.grabT<=0){
-    b.grabT=0.22;
+    b.grabT=0.45;
     for(let i=lootItems.length-1;i>=0;i--){
       const l=lootItems[i], q=l.mesh.position;
       const dx=q.x-b.pos.x, dz=q.z-b.pos.z;
@@ -4012,7 +4027,8 @@ function tick(){
     }
     updateStorm(dt);
     updateProjectiles(dt);
-    if(collapseT>0){collapseT-=dt;if(collapseT<=0)runCollapse();}
+    if(collapseCD>0)collapseCD-=dt;
+    if(collapseT>0){collapseT-=dt;if(collapseT<=0&&collapseCD<=0)runCollapse();}
   }
   // Kamera
   if(phase==="spectate"&&spec.target) applyThirdPerson(spec.target,dt);
