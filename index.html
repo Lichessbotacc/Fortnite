@@ -1522,7 +1522,7 @@ const player={
   using:null,useT:0,useTotal:0,rig:null,deathPlace:0,lastDmgBy:null
 };
 function resetPlayer(){
-  player.pos.set(rnd(-70,70),240,rnd(-70,70));
+  player.pos.set(rnd(-HALF+50,HALF-50),rnd(200,265),rnd(-HALF+50,HALF-50));
   player.vel.set(0,0,0); player.hp=100; player.sh=0; player.alive=true;
   player.mats={wood:0,brick:0,metal:0}; player.matSel="wood";
   player.ammo={light:36,medium:30,shells:12,heavy:6,rocket:0};
@@ -1552,7 +1552,7 @@ function spawnBots(n){
     const b={
       name:names[i%names.length]+(i>=names.length?" "+(1+Math.floor(i/names.length)):""),
       rig:rig, col:outfit.a,
-      pos:new THREE.Vector3(rnd(-HALF+30,HALF-30),240,rnd(-HALF+30,HALF-30)),
+      pos:new THREE.Vector3(rnd(-HALF+40,HALF-40),rnd(195,270),rnd(-HALF+40,HALF-40)),
       vel:new THREE.Vector3(), onGround:false, yaw:rnd(0,6.28), pitch:0,
       hp:100, sh:0, alive:true, kills:0,
       mats:{wood:ri(0,30),brick:0,metal:0}, matSel:"wood",
@@ -1562,7 +1562,10 @@ function spawnBots(n){
       heldItem:null, burstLeft:0, spin:0, using:null, useT:0, useTotal:0,
       skill:skill, react:rnd(.12,.45)/Math.max(.5,DIFF), aggr:rnd(.3,1),
       builder:rnd(.25,1), looter:rnd(.4,1),
-      state:"drop", land:new THREE.Vector3(poi.x+rnd(-24,24),0,poi.z+rnd(-24,24)),
+      state:"drop",
+      land: Math.random()<0.55
+        ? new THREE.Vector3(poi.x+rnd(-30,30),0,poi.z+rnd(-30,30))
+        : new THREE.Vector3(rnd(-HALF+45,HALF-45),0,rnd(-HALF+45,HALF-45)),
       target:null, lastSeen:null, seenT:0, scanT:rnd(0,.4),
       aimYaw:0, aimPitch:0, fireT:0, strafe:Math.random()<.5?1:-1, strafeT:0,
       goal:new THREE.Vector3(), goalT:0, lootGoal:null, lootT:rnd(0,1.2),
@@ -1570,7 +1573,11 @@ function spawnBots(n){
       panic:0, retreat:0, chatT:rnd(20,90),
       turtle:null, turtleCD:rnd(4,10), farmGoal:null, farmScanT:rnd(0,1.5),
       hurtT:0, boxOutT:0, avoidSide:Math.random()<.5?1:-1, armed:false, weapSwapT:0,
-      coverT:0, blockedHard:false
+      avoidHold:0, avoidDir:null, commitT:0, lootGoalT:0, noAvoidT:0,
+      stormFlee:false, stormProgT:0, stormLastD:undefined,
+      coverT:0, blockedHard:false,
+      ignore:new Set(), harvestBad:new Set(), badClearT:rnd(20,40),
+      anchor:null, anchorT:0, forceT:0, forceDir:new THREE.Vector3(), idleMoveT:0
     };
     // Kein Startgewehr: jeder Bot geht zuerst auf Waffensuche (wie im echten Match)
     bots.push(b);
@@ -2102,17 +2109,25 @@ function botBuildPiece(b,type,dirVec){
   return ok;
 }
 function botHarvest(b,dt){
-  if(!b.harvest||b.harvest.hp<=0||colliders.indexOf(b.harvest)<0){
-    b.harvest=null;
+  if(b.harvest){
+    b.harvestT-=dt;
+    if(b.harvest.hp<=0||colliders.indexOf(b.harvest)<0||b.harvestT<=0){
+      if(b.harvestT<=0&&b.harvest)b.harvestBad.add(b.harvest);   // kommt nicht ran -> merken
+      b.harvest=null;
+    }
+  }
+  if(!b.harvest){
     const near=nearbyR(b.pos.x,b.pos.z,20);
     let bd=20;
     for(const c of near){
-      if(!c.res)continue;
+      if(!c.res||b.harvestBad.has(c))continue;
+      if(c.max.y<b.pos.y-1.5||c.min.y>b.pos.y+3)continue;         // nicht von einem Dach aus hacken
       const cx=(c.min.x+c.max.x)/2,cz=(c.min.z+c.max.z)/2;
       const d=Math.hypot(cx-b.pos.x,cz-b.pos.z);
       if(d<bd){bd=d;b.harvest=c;}
     }
     if(!b.harvest)return false;
+    b.harvestT=6;
   }
   const c=b.harvest;
   const cx=(c.min.x+c.max.x)/2,cz=(c.min.z+c.max.z)/2;
@@ -2218,10 +2233,45 @@ function updateBot(b,dt){
   botSee(b,dt);
   if(b.reactT>0)b.reactT-=dt;
 
-  const inStorm=outside(b.pos.x,b.pos.z,6);
+  const inStorm=outside(b.pos.x,b.pos.z,12);   // schon am Rand rauslaufen, nicht erst im Schaden
   const stormDist=Math.hypot(b.pos.x-storm.cx,b.pos.z-storm.cz)-storm.r;
   const armed=botArmed(b);
   b.armed=armed;
+
+  // STURM hat immer Vorrang — auch vor Heilen und Bauen
+  if(inStorm){
+    b.turtle=null; b.using=null; b.useT=0; b.lootGoal=null; b.farmGoal=null;
+    b.harvest=null; b.commitT=0; b.emoteT=0;
+    const to=new THREE.Vector3(storm.cx-b.pos.x,0,storm.cz-b.pos.z);
+    if(to.lengthSq()<0.01)to.set(1,0,0);
+    to.normalize();
+    b.moveDir=to; b.speed=8.4;                    // Sprint aus dem Sturm
+    b.yaw=angLerp(b.yaw,Math.atan2(-to.x,-to.z),.16);
+    b.pitch=lerp(b.pitch,0,.1);
+    if(outside(b.pos.x,b.pos.z,0))damage(b,Math.max(0.6,storm.dps)*dt,null);
+    b.stormFlee=true; b.forceT=0; b.commitT=0;
+    // Fortschritt Richtung Zentrum messen — sonst hängt der Bot am Hindernis fest
+    const dCen=Math.hypot(b.pos.x-storm.cx,b.pos.z-storm.cz);
+    if(b.stormLastD===undefined)b.stormLastD=dCen;
+    b.stormProgT=(b.stormProgT||0)+dt;
+    if(b.stormProgT>1.5){
+      if(b.stormLastD-dCen<1.5){          // kaum näher gekommen -> Hindernis wegräumen
+        b.noAvoidT=2.0;
+        botBreakThrough(b);
+        if(b.onGround&&b.jumpCD<=0){ b.vel.y=9.4; b.jumpCD=.4; }
+        if(botPickMat(b,false))botBuildPiece(b,"ramp",to);
+      }
+      b.stormLastD=dCen; b.stormProgT=0;
+    }
+    // im Sturm nicht an Hindernissen kleben: durchschlagen, notfalls drüber bauen
+    if(b.stuck>0.5)botBreakThrough(b);
+    if(b.stuck>1.4){
+      if(b.onGround&&b.jumpCD<=0){ b.vel.y=9.4; b.jumpCD=.5; }
+      if(botPickMat(b,false))botBuildPiece(b,"ramp",to);
+      b.stuck=0.6;
+    }
+    finishBotFrame(b,dt); return;
+  }
 
   // Heilen außerhalb der Box (im Freien) — wird bei Gegnernähe abgebrochen
   if(b.using&&!b.turtle){
@@ -2229,15 +2279,6 @@ function updateBot(b,dt){
     if(b.useT<=0)finishUse(b);
     if(b.target&&b.target.alive&&b.pos.distanceTo(b.target.pos)<30){ b.using=null; }
     else { finishBotFrame(b,dt); return; }
-  }
-
-  if(inStorm){
-    b.turtle=null; b.using=null;
-    const to=new THREE.Vector3(storm.cx-b.pos.x,0,storm.cz-b.pos.z).normalize();
-    b.moveDir=to; b.speed=7.6;
-    b.yaw=angLerp(b.yaw,Math.atan2(-to.x,-to.z),.12);
-    damage(b,Math.max(0.6,storm.dps)*dt,null);
-    finishBotFrame(b,dt); return;
   }
 
   // Box nur zum Heilen
@@ -2277,12 +2318,17 @@ function botFlee(b,dt){
   } else b.buildCD-=dt;
   // Richtung nächste Waffe / weg vom Gegner
   const goal=botNearestGun(b);
+  let dir=null;
   if(goal){
-    const g=new THREE.Vector3(goal.x-b.pos.x,0,goal.z-b.pos.z).normalize();
-    b.moveDir=g.addScaledVector(to,-0.5).normalize();
-  } else {
-    b.moveDir=to.clone().multiplyScalar(-1);
+    const g=new THREE.Vector3(goal.x-b.pos.x,0,goal.z-b.pos.z);
+    if(g.lengthSq()>0.01){ g.normalize().addScaledVector(to,-0.45);
+      if(g.lengthSq()>0.05)dir=g.normalize(); }
   }
+  if(!dir){                                   // kein Ziel / Vektoren heben sich auf: seitlich weg
+    const side=new THREE.Vector3(-to.z,0,to.x).multiplyScalar(b.strafe);
+    dir=to.clone().multiplyScalar(-1).addScaledVector(side,.6).normalize();
+  }
+  b.moveDir=dir;
   b.speed=8.0;
   b.yaw=angLerp(b.yaw,Math.atan2(-b.moveDir.x,-b.moveDir.z),.16);
 }
@@ -2290,6 +2336,7 @@ function botNearestGun(b){
   let best=null,bd=180;
   for(const l of lootItems){
     if(l.item.kind!=="weapon")continue;
+    if(b.ignore.has(l))continue;
     const p=l.mesh.position;
     const d=Math.hypot(p.x-b.pos.x,p.z-b.pos.z);
     if(d<bd&&!outside(p.x,p.z,8)){bd=d;best={x:p.x,z:p.z,loot:l};}
@@ -2394,6 +2441,19 @@ function botFight(b,dt){
 function botIdle(b,dt,stormDist){
   b.aiming=false;
   const armed=b.armed;
+  /* Nach dem Watchdog: eine Weile stur ein weit entferntes Ziel anlaufen,
+     damit sich der Bot nicht sofort wieder im selben Konflikt verhakt. */
+  if(b.commitT>0){
+    b.commitT-=dt;
+    const to=new THREE.Vector3(b.goal.x-b.pos.x,0,b.goal.z-b.pos.z);
+    if(to.length()>3){
+      to.normalize(); b.moveDir=to; b.speed=7.2;
+      b.yaw=angLerp(b.yaw,Math.atan2(-to.x,-to.z),.14);
+      b.pitch=lerp(b.pitch,0,.1);
+      return;
+    }
+    b.commitT=0;
+  }
   // Heilen wenn ruhig
   if((b.hp<85||b.sh<60)&&!b.using){
     const hi=botFindHeal(b);
@@ -2408,10 +2468,14 @@ function botIdle(b,dt,stormDist){
   if(!armed){
     b.farmGoal=null;
     b.lootT-=dt;
-    if(!b.lootGoal||b.lootT<=0){ b.lootT=1.2; b.lootGoal=botNearestGun(b); }
+    if(!b.lootGoal||b.lootT<=0){ b.lootT=1.2; if(!b.lootGoal){b.lootGoal=botNearestGun(b); b.lootGoalT=0;} }
+    if(b.lootGoal){
+      b.lootGoalT=(b.lootGoalT||0)+dt;
+      if(b.lootGoalT>11){ if(b.lootGoal.loot)b.ignore.add(b.lootGoal.loot); b.lootGoal=null; b.lootGoalT=0; }
+    }
     if(b.lootGoal){
       const gd=Math.hypot(b.lootGoal.x-b.pos.x,b.lootGoal.z-b.pos.z);
-      if(gd<2.6){ botCollect(b,b.lootGoal); b.lootGoal=null; b.lootT=0.15; }
+      if(gd<2.6){ botCollect(b,b.lootGoal); b.lootGoal=null; b.lootGoalT=0; b.lootT=0.15; }
       else {
         const to=new THREE.Vector3(b.lootGoal.x-b.pos.x,0,b.lootGoal.z-b.pos.z).normalize();
         b.moveDir=to; b.speed=7.4;
@@ -2488,12 +2552,19 @@ function botIdle(b,dt,stormDist){
     for(const l of lootItems){
       const p=l.mesh.position;
       const d=Math.hypot(p.x-b.pos.x,p.z-b.pos.z);
-      if(d<bd&&!outside(p.x,p.z,8)&&botWants(b,l.item)){bd=d;b.lootGoal={x:p.x,z:p.z,loot:l};}
+      if(d<bd&&!b.ignore.has(l)&&!outside(p.x,p.z,8)&&botWants(b,l.item)){bd=d;b.lootGoal={x:p.x,z:p.z,loot:l};}
+    }
+  }
+  if(b.lootGoal){
+    b.lootGoalT=(b.lootGoalT||0)+dt;
+    if(b.lootGoalT>11){                      // unerreichbar -> aufgeben
+      if(b.lootGoal.loot)b.ignore.add(b.lootGoal.loot);
+      b.lootGoal=null; b.lootGoalT=0; b.lootT=0.6;
     }
   }
   if(b.lootGoal){
     const gd=Math.hypot(b.lootGoal.x-b.pos.x,b.lootGoal.z-b.pos.z);
-    if(gd<2.4){ botCollect(b,b.lootGoal); b.lootGoal=null; b.lootT=0.2; }
+    if(gd<2.6){ botCollect(b,b.lootGoal); b.lootGoal=null; b.lootGoalT=0; b.lootT=0.2; }
     else {
       const to=new THREE.Vector3(b.lootGoal.x-b.pos.x,0,b.lootGoal.z-b.pos.z).normalize();
       b.moveDir=to; b.speed=5.8;
@@ -2507,6 +2578,17 @@ function botIdle(b,dt,stormDist){
     b.emoteT=rnd(2,4); b.chatT=rnd(40,120);
   }
   if(b.emoteT>0){ b.emoteT-=dt; b.moveDir=new THREE.Vector3(); return; }
+  // Sturm zieht zu: aktiv in Richtung sichere Zone laufen
+  if(stormDist>-45){
+    const to=new THREE.Vector3(storm.cx-b.pos.x,0,storm.cz-b.pos.z);
+    if(to.lengthSq()>1){
+      to.normalize();
+      b.moveDir=to; b.speed=stormDist>-18?8.2:6.8;
+      b.yaw=angLerp(b.yaw,Math.atan2(-to.x,-to.z),.12);
+      b.pitch=lerp(b.pitch,0,.1);
+      return;
+    }
+  }
   // Rotieren
   b.goalT-=dt;
   if(b.goalT<=0){
@@ -2551,7 +2633,7 @@ function botCollect(b,g){
   if(g.chest){ openChest(g.chest); return; }
   if(g.ammo){ openAmmoBox(g.ammo); return; }
   const l=g.loot; if(!l||lootItems.indexOf(l)<0)return;
-  if(!botWants(b,l.item))return;
+  if(!botWants(b,l.item)){ b.ignore.add(l); return; }
   if(l.item.kind==="weapon"){
     let empty=-1,worst=-1,ws=1e9;
     for(let i=1;i<b.slots.length;i++){
@@ -2570,8 +2652,15 @@ function botPathFree(b,dir,dist){
   const x=b.pos.x+dir.x*dist, z=b.pos.z+dir.z*dist;
   return !blocked(x,b.pos.y+0.05,z,PR+0.12,PH*0.7);
 }
-function botAvoid(b){
+function botAvoid(b,dt){
+  if(b.noAvoidT>0){ b.noAvoidT-=dt; return; }   // bewusst geradeaus (Bot schlägt sich frei)
   if(!b.moveDir||b.moveDir.lengthSq()<0.001)return;
+  // einmal gewählte Ausweichrichtung kurz beibehalten -> kein Zittern vor Wänden
+  if(b.avoidHold>0){
+    b.avoidHold-=dt;
+    if(b.avoidDir&&botPathFree(b,b.avoidDir,1.1)){ b.moveDir.copy(b.avoidDir); return; }
+    b.avoidHold=0;
+  }
   if(botPathFree(b,b.moveDir,1.1)){ b.avoidT=0; return; }
   // seitlich ausweichen — findet auch Türöffnungen in Häusern
   const angles=[0.5,1.0,1.6,2.2,2.8];
@@ -2582,7 +2671,12 @@ function botAvoid(b){
   for(const a of list){
     const ca=Math.cos(a), sa=Math.sin(a);
     const d=new THREE.Vector3(d0.x*ca-d0.z*sa,0,d0.x*sa+d0.z*ca).normalize();
-    if(botPathFree(b,d,1.3)){ b.moveDir.copy(d); return; }
+    if(botPathFree(b,d,1.3)){
+      b.moveDir.copy(d);
+      b.avoidDir=b.avoidDir?b.avoidDir.copy(d):d.clone();
+      b.avoidHold=0.75;
+      return;
+    }
   }
   b.blockedHard=true;
 }
@@ -2598,11 +2692,20 @@ function botBreakThrough(b){
 }
 function finishBotFrame(b,dt){
   const before=b.pos.clone();
-  if(!b.turtle)botAvoid(b);
+  // Blacklists regelmäßig leeren, damit nichts dauerhaft verloren geht
+  b.badClearT-=dt;
+  if(b.badClearT<=0){ b.badClearT=rnd(25,45); b.harvestBad.clear(); b.ignore.clear(); }
+  // Zwangsbewegung nach Watchdog-Auslösung
+  if(b.forceT>0&&!b.turtle&&!b.using&&!b.stormFlee){
+    b.forceT-=dt;
+    b.moveDir.copy(b.forceDir); b.speed=6.8;
+    b.yaw=angLerp(b.yaw,Math.atan2(-b.forceDir.x,-b.forceDir.z),.2);
+  }
+  if(!b.turtle)botAvoid(b,dt);
   b.vel.x=b.moveDir.x*b.speed; b.vel.z=b.moveDir.z*b.speed;
   moveEntity(b,dt,PR,PH);
   depenetrate(b,PR,PH);
-  const moved=b.pos.distanceTo(before);
+  const moved=Math.hypot(b.pos.x-before.x,b.pos.z-before.z);   // nur horizontal zählt
   if(moved<b.speed*dt*0.35&&b.speed>1){ b.stuck+=dt; } else b.stuck=Math.max(0,b.stuck-dt*2);
 
   if(b.stuck>0.35&&b.onGround&&b.jumpCD<=0){ b.vel.y=9.2; b.jumpCD=.5; }     // 1. kleine Kante? springen
@@ -2619,6 +2722,29 @@ function finishBotFrame(b,dt){
     b.goal.set(storm.cx+rnd(-30,30),0,storm.cz+rnd(-30,30));
     if(!blocked(b.pos.x,b.pos.y+2.2,b.pos.z,PR,PH))b.pos.y+=1.2;
   }
+  /* ---- Watchdog: kein Bot bleibt stehen (außer beim Heilen/in der Heilbox) ---- */
+  if(!b.anchor)b.anchor=b.pos.clone();
+  b.anchorT+=dt;
+  if(b.anchorT>2.5){
+    const disp=Math.hypot(b.pos.x-b.anchor.x,b.pos.z-b.anchor.z);
+    if(disp<2.0&&!b.using&&!b.turtle&&!b.stormFlee){
+      if(b.harvest){ b.harvestBad.add(b.harvest); b.harvest=null; }
+      if(b.lootGoal&&b.lootGoal.loot)b.ignore.add(b.lootGoal.loot);
+      b.lootGoal=null; b.farmGoal=null; b.goalT=0; b.harvestT=0;
+      b.target=null; b.seenT=0; b.emoteT=0; b.stuck=0;
+      const a=rnd(0,6.283);
+      b.forceDir.set(Math.cos(a),0,Math.sin(a)); b.forceT=rnd(1.2,2.2);
+      b.noAvoidT=0.8; botBreakThrough(b);
+      if(b.onGround&&b.jumpCD<=0){ b.vel.y=9.2; b.jumpCD=.5; }
+      // weit weg und für ein paar Sekunden nicht mehr umentscheiden
+      const gx=clamp(storm.cx+Math.cos(a)*rnd(20,Math.max(25,storm.r*.5)),-HALF+20,HALF-20);
+      const gz=clamp(storm.cz+Math.sin(a)*rnd(20,Math.max(25,storm.r*.5)),-HALF+20,HALF-20);
+      b.goal.set(gx,0,gz);
+      b.commitT=rnd(4,7);
+    }
+    b.anchor.copy(b.pos); b.anchorT=0;
+  }
+  b.stormFlee=false;
   b.heldItem=b.slots[b.sel];
   setRigWeapon(b.rig,b.heldItem);
   animRig(b,dt);
