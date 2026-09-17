@@ -95,21 +95,28 @@ canvas{display:block;touch-action:none}
   display:none;transform:translate(-50%,-50%)}
 #stick i{position:absolute;left:50%;top:50%;width:58px;height:58px;margin:-29px 0 0 -29px;border-radius:50%;
   background:rgba(200,230,255,.3);border:2px solid rgba(255,255,255,.5)}
-.tb{position:absolute;border-radius:50%;background:rgba(10,18,26,.55);border:1px solid var(--line);
-  color:var(--ink);font-family:'Barlow Condensed';display:flex;align-items:center;justify-content:center;
-  text-align:center;line-height:1;pointer-events:auto;font-size:17px;padding:4px;touch-action:none}
-.tb:active,.tb.on{background:rgba(111,208,255,.5)}
-#tFire{width:104px;height:104px;right:26px;bottom:110px;font-size:19px}
-#tJump{width:74px;height:74px;right:148px;bottom:150px}
-#tBuild{width:70px;height:70px;right:36px;bottom:232px}
-#tPiece{width:62px;height:62px;right:126px;bottom:262px}
-#tUse{width:74px;height:74px;right:144px;bottom:62px}
-#tReload{width:62px;height:62px;right:34px;bottom:24px}
-#tMat{width:58px;height:58px;right:126px;bottom:8px}
+.tb{position:absolute;border-radius:16px;background:rgba(10,18,26,.62);border:1px solid var(--line);
+  color:var(--ink);font-family:'Barlow Condensed';font-weight:600;display:flex;align-items:center;justify-content:center;
+  text-align:center;line-height:1.05;pointer-events:auto;font-size:16px;padding:4px 6px;touch-action:none;
+  letter-spacing:.2px}
+.tb:active,.tb.on{background:rgba(111,208,255,.55)}
+.tb.dyn{flex-direction:column;gap:2px}
+.tb.dyn i{font-style:normal;font-size:10px;letter-spacing:1px;color:var(--dim);text-transform:uppercase}
+.tb.dyn b{font-size:16px;font-weight:700;line-height:1.05}
+.tb.ready{background:rgba(242,193,78,.28);border-color:var(--gold)}
+.tb.ready b{color:var(--gold)}
+#tFire{width:104px;height:104px;right:26px;bottom:110px;font-size:19px;border-radius:50%}
+#tJump{width:74px;height:74px;right:148px;bottom:150px;border-radius:50%}
+#tBuild{width:70px;height:70px;right:36px;bottom:232px;border-radius:50%}
+#tPiece{width:78px;height:70px;right:126px;bottom:262px}
+#tUse{width:96px;height:78px;right:144px;bottom:62px}
+#tReload{width:74px;height:62px;right:34px;bottom:24px;font-size:14px}
+#tMat{width:74px;height:70px;right:126px;bottom:8px}
 #tSlots{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:flex;gap:8px;pointer-events:auto;touch-action:none}
 #tSlots .tb{position:relative;width:52px;height:52px;border-radius:10px;right:auto;bottom:auto}
-#tAds{width:62px;height:62px;right:214px;bottom:96px}
-#tPause{width:46px;height:46px;left:16px;top:16px;font-size:15px}
+#tAds{width:70px;height:70px;right:214px;bottom:96px;border-radius:50%}
+#tPause{width:46px;height:46px;left:16px;top:16px;font-size:13px;border-radius:50%}
+#tUnstuck{width:60px;height:60px;left:16px;top:72px;font-size:13px;background:rgba(255,90,77,.32);border-radius:50%}
 #spectate{position:fixed;left:0;right:0;bottom:0;padding:16px;display:flex;gap:12px;justify-content:center;
   align-items:center;background:linear-gradient(transparent,rgba(6,10,14,.85));z-index:4;pointer-events:auto}
 #spectate span{font-family:'Barlow Condensed';font-size:21px;color:var(--dim)}
@@ -185,14 +192,15 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
 <div id="touch" class="hidden">
   <div id="stick"><i></i></div>
   <div class="tb" id="tPause">II</div>
+  <div class="tb" id="tUnstuck">Frei!</div>
   <div class="tb" id="tFire">Feuer</div>
   <div class="tb" id="tAds">Zielen</div>
-  <div class="tb" id="tJump">Sprung</div>
+  <div class="tb" id="tJump">Springen</div>
   <div class="tb" id="tBuild">Bauen</div>
-  <div class="tb" id="tPiece">Wand</div>
-  <div class="tb" id="tUse">Aufheben</div>
-  <div class="tb" id="tReload">Laden</div>
-  <div class="tb" id="tMat">Holz</div>
+  <div class="tb dyn" id="tPiece"><i>Bauteil</i><b>Wand</b></div>
+  <div class="tb dyn ready" id="tUse"><i>Aktion</i><b>—</b></div>
+  <div class="tb" id="tReload">Nachladen</div>
+  <div class="tb dyn" id="tMat"><i>Material</i><b>Holz</b></div>
   <div id="tSlots"></div>
 </div>
 
@@ -220,6 +228,7 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
       <li><b>Linksklick</b> Schießen / Schlagen / Bauen</li><li><b>Rechtsklick</b> Zielen</li>
       <li><b>1 – 5</b> Inventar</li><li><b>R</b> Nachladen</li>
       <li><b>E</b> Aufheben / Truhe öffnen</li><li><b>Z X C</b> Wand / Rampe / Boden</li>
+      <li><b>K</b> Freikommen (falls stecken)</li>
       <li><b>B</b> Baumodus an/aus</li><li><b>F</b> Material wechseln</li>
       <li><b>Esc</b> Pause</li><li><b>Mausrad</b> Slot wechseln</li>
     </ul>
@@ -673,6 +682,33 @@ function blocked(x,y,z,r,h){
   for(let i=0;i<n.length;i++){const c=n[i]; if(overlaps(x,y,z,r,h,c)&&c.max.y>y+0.75) return true;}
   return false;
 }
+// Drückt eine Figur aus überlappender Geometrie heraus (z.B. wenn eine Wand direkt
+// im Körper gebaut wird oder Boxen sich beim Laden überschneiden).
+function depenetrate(e,r,h){
+  const near=nearby(e.pos.x,e.pos.z);
+  for(let iter=0;iter<4;iter++){
+    let pushed=false;
+    for(let i=0;i<near.length;i++){
+      const c=near[i];
+      if(!overlaps(e.pos.x,e.pos.y,e.pos.z,r,h,c))continue;
+      const overX=Math.min(e.pos.x+r-c.min.x, c.max.x-(e.pos.x-r));
+      const overZ=Math.min(e.pos.z+r-c.min.z, c.max.z-(e.pos.z-r));
+      const overY=Math.min(e.pos.y+h-c.min.y, c.max.y-e.pos.y);
+      if(overX<=0||overZ<=0||overY<=0)continue;
+      const minO=Math.min(overX,overZ,overY);
+      if(minO===overY){
+        if(e.pos.y+h-c.min.y<c.max.y-e.pos.y){e.pos.y=c.min.y-h-0.02;e.vel.y=Math.min(e.vel.y,0);}
+        else {e.pos.y=c.max.y+0.02;e.vel.y=0;}
+      } else if(minO===overX){
+        e.pos.x+= (e.pos.x-c.min.x<c.max.x-e.pos.x) ? -(overX+0.02) : (overX+0.02);
+      } else {
+        e.pos.z+= (e.pos.z-c.min.z<c.max.z-e.pos.z) ? -(overZ+0.02) : (overZ+0.02);
+      }
+      pushed=true;
+    }
+    if(!pushed)break;
+  }
+}
 
 /* ============ Schießen ============ */
 const ray=new THREE.Raycaster();
@@ -950,6 +986,7 @@ function updateBots(dt){
     if(b.onGround&&b.jump<=0&&Math.random()<dt*0.4){b.vel.y=8.4;b.jump=1.2;}
     b.jump-=dt;
     moveEntity(b,dt,PR,PH);
+    depenetrate(b,PR,PH);
     // Hängenbleiben lösen
     if(b.pos.distanceTo(before)<speed*dt*0.35){b.stuck+=dt;}else b.stuck=0;
     if(b.stuck>0.7){ if(b.onGround)b.vel.y=8.6; b.goalT=0; b.strafe*=-1; b.stuck=0; }
@@ -1006,6 +1043,7 @@ addEventListener("keydown",e=>{
   if(e.code==="KeyF"){const o=["wood","brick","metal"];player.matSel=o[(o.indexOf(player.matSel)+1)%3];updateHUD();}
   if(e.code==="KeyR")reload();
   if(e.code==="KeyE")interact();
+  if(e.code==="KeyK")unstuck();
   if(/^Digit[1-5]$/.test(e.code)){player.sel=+e.code[5]-1;player.build=false;player.reloading=0;updateHUD();}
   if(e.code==="Space"&&phase==="drop")keys.Space=true;
 });
@@ -1041,7 +1079,7 @@ const touchMove={x:0,y:0};
 let stickId=null,stickOx=0,stickOy=0,lookId=null,lookX=0,lookY=0;
 let editMode=false;
 const LAYOUT_KEY="sturmfeld_touch_layout_v1";
-const DRAGGABLE_IDS=["tFire","tAds","tJump","tBuild","tPiece","tUse","tReload","tMat","tPause","tSlots"];
+const DRAGGABLE_IDS=["tFire","tAds","tJump","tBuild","tPiece","tUse","tReload","tMat","tPause","tUnstuck","tSlots"];
 function loadLayout(){ try{return JSON.parse(localStorage.getItem(LAYOUT_KEY)||"{}");}catch(e){return {};} }
 function saveLayoutEntry(id,l,t){
   const L=loadLayout(); L[id]={l:l,t:t}; try{localStorage.setItem(LAYOUT_KEY,JSON.stringify(L));}catch(e){}
@@ -1099,6 +1137,12 @@ function exitEditMode(){
   el("touch").classList.add("hidden");
   document.getElementById("overlay").classList.remove("hidden");
 }
+function setDynLabel(id,text){ const n=document.getElementById(id); const b=n&&n.querySelector("b"); if(b)b.textContent=text; }
+const MATCOL={wood:"#c98a46",brick:"#b4715a",metal:"#8fa0ad"};
+function setMatButton(){
+  setDynLabel("tMat",{wood:"Holz",brick:"Stein",metal:"Metall"}[player.matSel]);
+  const n=document.getElementById("tMat"); if(n)n.style.borderColor=MATCOL[player.matSel];
+}
 function initTouch(){
   document.body.style.touchAction="none";
   const t=el("touch"); t.classList.add("on");
@@ -1119,15 +1163,17 @@ function initTouch(){
   hold("tJump",()=>{keys.Space=true;setTimeout(()=>keys.Space=false,140);},null);
   hold("tBuild",()=>{player.build=!player.build;updateHUD();},null);
   hold("tPiece",()=>{const o=["wall","ramp","floor"];player.piece=o[(o.indexOf(player.piece)+1)%3];
-    player.build=true;el("tPiece").textContent={wall:"Wand",ramp:"Rampe",floor:"Boden"}[player.piece];updateHUD();},null);
+    player.build=true;setDynLabel("tPiece",{wall:"Wand",ramp:"Rampe",floor:"Boden"}[player.piece]);updateHUD();},null);
   hold("tUse",()=>interact(),null);
   hold("tReload",()=>reload(),null);
   hold("tMat",()=>{const o=["wood","brick","metal"];player.matSel=o[(o.indexOf(player.matSel)+1)%3];
-    el("tMat").textContent={wood:"Holz",brick:"Stein",metal:"Metall"}[player.matSel];updateHUD();},null);
+    setMatButton();updateHUD();},null);
   hold("tPause",()=>setPaused(true),null);
+  hold("tUnstuck",()=>unstuck(),null);
 
   DRAGGABLE_IDS.forEach(id=>{ const n=document.getElementById(id); if(n)makeDraggable(n); });
   applyTouchLayout();
+  setMatButton();
 
   const st=el("stick");
   addEventListener("pointerdown",e=>{
@@ -1176,18 +1222,38 @@ function finishReload(){
   const take=Math.min(need,have); w.inMag+=take; player.ammo[w.def.ammo]-=take;
   sfx(260,.07,"square",.12);
 }
-function interact(){
-  // Truhe
-  for(const c of chests){
-    if(!c.open&&Math.hypot(c.x-player.pos.x,c.z-player.pos.z)<2.8&&Math.abs(player.pos.y)<6){openChest(c);return;}
+function unstuck(){
+  if(!player.alive)return;
+  depenetrate(player,PR,PH);
+  if(blocked(player.pos.x,player.pos.y+0.1,player.pos.z,PR,PH*0.5)){
+    for(let dy=1;dy<40;dy+=1){
+      if(!blocked(player.pos.x,player.pos.y+dy,player.pos.z,PR,PH)){ player.pos.y+=dy+0.1; break; }
+    }
   }
-  // Loot
-  let best=null,bd=2.6;
+  player.vel.set(0,0,0);
+  feed("Freigekommen");
+  sfx(500,.08,"triangle",.14);
+}
+function nearestChest(){
+  let best=null,bd=3.2;
+  for(const c of chests){
+    if(c.open)continue;
+    const d=Math.hypot(c.x-player.pos.x,c.z-player.pos.z);
+    if(d<bd&&Math.abs(player.pos.y-0.45)<4){bd=d;best=c;}
+  }
+  return best;
+}
+function nearestLoot(){
+  let best=null,bd=3.0;
   for(const l of lootItems){
     const d=l.mesh.position.distanceTo(new THREE.Vector3(player.pos.x,player.pos.y+.55,player.pos.z));
     if(d<bd){bd=d;best=l;}
   }
-  if(best)takeLoot(best);
+  return best;
+}
+function interact(){
+  const c=nearestChest(); if(c){openChest(c);return;}
+  const l=nearestLoot(); if(l){takeLoot(l);return;}
 }
 function takeLoot(l){
   const it=l.item;
@@ -1314,19 +1380,29 @@ function updateHUD(){
     a.innerHTML='<div class="big">—</div><div class="res">'+(player.slots[player.sel].name||"")+'</div>';
   } else a.innerHTML='<div class="big">—</div><div class="res">Leerer Platz</div>';
 }
+function currentInteraction(){
+  const c=nearestChest();
+  if(c)return {label:"Truhe öffnen",short:"Truhe"};
+  const l=nearestLoot();
+  if(l){
+    const it=l.item;
+    const label=it.kind==="weapon"?it.name+" ("+RAR[it.rar].n+")":
+      it.kind==="ammo"?it.n+" Munition ("+AMMO_NAME[it.t]+")":
+      it.kind==="shield"?"Schildtrank":"Medikit";
+    const short=it.kind==="weapon"?it.name:it.kind==="ammo"?"Munition":it.kind==="shield"?"Schild":"Medikit";
+    return {label:label,short:short};
+  }
+  return null;
+}
 function updatePrompt(){
   const p=el("prompt");
-  let txt=null;
-  for(const c of chests) if(!c.open&&Math.hypot(c.x-player.pos.x,c.z-player.pos.z)<2.8){txt="<b>E</b> Truhe öffnen";break;}
-  if(!txt) for(const l of lootItems){
-    if(l.mesh.position.distanceTo(new THREE.Vector3(player.pos.x,player.pos.y+.55,player.pos.z))<2.6){
-      const it=l.item;
-      txt="<b>E</b> "+(it.kind==="weapon"?it.name+" ("+RAR[it.rar].n+")":
-        it.kind==="ammo"?it.n+" Munition ("+AMMO_NAME[it.t]+")":it.kind==="shield"?"Schildtrank":"Medikit");
-      break;
-    }
+  const cur=currentInteraction();
+  p.classList.toggle("hidden",!cur); if(cur)p.innerHTML="<b>E</b> "+cur.label;
+  const tu=document.getElementById("tUse");
+  if(tu){
+    setDynLabel("tUse",cur?cur.short:"—");
+    tu.classList.toggle("ready",!!cur);
   }
-  p.classList.toggle("hidden",!txt); if(txt)p.innerHTML=txt;
 }
 /* Minimap */
 const mc=el("map").getContext("2d");
@@ -1417,7 +1493,7 @@ function startMatch(){
   spawnBots(parseInt(el("optBots").value,10));
   phase="drop"; dropGlide=false; running=true; paused=false;
   if(TOUCH){ el("touch").classList.remove("hidden");
-    el("tPiece").textContent="Wand"; el("tMat").textContent="Holz"; applyTouchLayout(); }
+    setDynLabel("tPiece","Wand"); setMatButton(); applyTouchLayout(); }
   updateHUD(); lock();
   feed("Match gestartet - "+aliveCount()+" Spieler springen ab");
 }
@@ -1520,6 +1596,7 @@ function updatePlay(dt){
   if(keys.Space&&player.onGround){player.vel.y=9.2;player.onGround=false;}
   const wasAir=!player.onGround, vy=player.vel.y;
   moveEntity(player,dt,PR,PH);
+  depenetrate(player,PR,PH);
   if(wasAir&&player.onGround&&vy<-19){ damage(player,Math.min(60,(-vy-19)*3.2),null); }
 
   // Kopfwackeln
