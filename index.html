@@ -1233,7 +1233,7 @@ function muzzleWorld(rig){
 function animRig(e,dt){
   const rig=e.rig; if(!rig)return;
   rig.root.position.set(e.pos.x,e.pos.y,e.pos.z);
-  rig.yaw.rotation.y=e.yaw;
+  rig.yaw.rotation.y=e.yaw+Math.PI;   // Modell war um 180° verdreht gebaut (Front zeigte zur Kamera statt weg von ihr)
   if(e.lodSkip)return;          // weit weg: nur Position, keine Gliedmassen-Animation
   if(rig.blob){
     const gy=groundAt(e.pos.x,e.pos.z,e.pos.y+0.2);
@@ -1780,9 +1780,14 @@ function sndVictory(){
   [523,659,784,1047,1319].forEach((f,i)=>tone(f,f,.42,"triangle",.17,i*.13,.7));
 }
 function sndChest(){
-  [784,988,1175,1568].forEach((f,i)=>tone(f,f,.30,"triangle",.13,i*.07,.6));
+  const notes=[784,988,1175,1568,1976];
+  notes.forEach((f,i)=>{ tone(f,f,.34,"sine",.15,i*.055,.55); tone(f*2,f*2,.16,"triangle",.05,i*.055+.01,.4); });
 }
-function sndChestAt(pos){ const v=distVol(pos,70); if(v>.05)[784,988,1175,1568].forEach((f,i)=>tone(f,f,.25,"triangle",.11*v,i*.07,.4)); }
+function sndChestAt(pos){
+  const v=distVol(pos,70); if(v<=.05)return;
+  const notes=[784,988,1175,1568,1976];
+  notes.forEach((f,i)=>{ tone(f,f,.30,"sine",.13*v,i*.055,.4); tone(f*2,f*2,.14,"triangle",.045*v,i*.055+.01,.3); });
+}
 function sndPickup(){ tone(880,1320,.09,"triangle",.14); tone(1320,1760,.07,"triangle",.08,.05); }
 function sndBuild(mt,vol){
   const v=vol===undefined?1:vol;
@@ -1809,7 +1814,13 @@ function sndExplodeAt(pos){
   noiseHit(1.1,.22*v,"lowpass",400,1,1.0,.06);
 }
 function sndStormTick(){ tone(180,120,.22,"sawtooth",.13); noiseHit(.3,.1,"bandpass",500,1,.4); }
-function sndZone(){ tone(330,220,.5,"triangle",.14,0,.6); tone(220,165,.7,"sine",.12,.12,.6); }
+function sndZoneClose(){        // Sturm beginnt zu schließen — dringliche Sirene, ähnlich dem OG-Warnsignal
+  for(let i=0;i<3;i++) tone(520,780,.28,"sawtooth",.12,i*.32,.5);
+  noiseHit(.6,.10,"bandpass",900,1.4,.4,.05);
+}
+function sndZoneStable(){       // neuer Sturmkreis steht — ruhiger, kurzer Doppelklang
+  tone(392,392,.30,"triangle",.13,0,.5); tone(523,523,.34,"triangle",.13,.10,.5);
+}
 function sndSwitch(){ noiseHit(.04,.10,"bandpass",2000,2,.05); }
 function sndDamageTaken(head){ tone(head?260:200,90,.12,"square",.16); noiseHit(.10,.12,"lowpass",800,1,.2); }
 /* Sturm-Ambiente */
@@ -1857,7 +1868,7 @@ function updateStorm(dt){
     storm.tz=clamp(storm.cz+Math.sin(a)*d,-HALF+storm.tr,HALF-storm.tr);
     storm.state="move"; storm.t=p.move; storm.moveDur=p.move; storm.dps=p.dps;
     storm.r0=storm.r; storm.cx0=storm.cx; storm.cz0=storm.cz;
-    zoneMsg("Der Sturm zieht sich zusammen");
+    zoneMsg("Der Sturm zieht sich zusammen","close");
   } else if(storm.state==="move"){
     const p=Math.min(1,1-storm.t/storm.moveDur);
     storm.r=storm.r0+(storm.tr-storm.r0)*p;
@@ -1865,13 +1876,14 @@ function updateStorm(dt){
     storm.cz=storm.cz0+(storm.tz-storm.cz0)*p;
     if(storm.t<=0){storm.state="wait";storm.phase++;
       storm.t=PHASES[Math.min(storm.phase,PHASES.length-1)].wait;
-      zoneMsg("Zone stabil — Sturmkreis "+(storm.phase+1));}
+      zoneMsg("Zone stabil — Sturmkreis "+(storm.phase+1),"stable");}
   }
   if(storm.mesh){storm.mesh.position.set(storm.cx,0,storm.cz);storm.mesh.scale.set(storm.r,1,storm.r);}
 }
 function outside(x,z,pad){return Math.hypot(x-storm.cx,z-storm.cz)>storm.r-(pad||0);}
 let zoneTimer=0;
-function zoneMsg(t){const e=el("zoneMsg");e.textContent=t;e.style.opacity=1;zoneTimer=3.2;sndZone();}
+function zoneMsg(t,kind){const e=el("zoneMsg");e.textContent=t;e.style.opacity=1;zoneTimer=3.2;
+  if(kind==="close")sndZoneClose(); else sndZoneStable();}
 
 /* ======================================================================
    LOOT IN DER WELT
