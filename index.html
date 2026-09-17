@@ -95,7 +95,7 @@ canvas{display:block;touch-action:none}
   font-size:20px;color:#d9b6ff;text-shadow:0 2px 6px #000;opacity:0;transition:opacity .4s}
 
 /* feed */
-#feed{position:fixed;right:18px;top:270px;width:300px;text-align:right;font-family:'Barlow Condensed';font-size:17px}
+#feed{position:fixed;right:18px;top:270px;width:200px;text-align:right;font-family:'Barlow Condensed';font-size:15px}
 #feed div{background:rgba(8,12,17,.7);border-right:3px solid var(--hit);padding:3px 8px;margin-bottom:4px;animation:sl .25s ease-out}
 @keyframes sl{from{opacity:0;transform:translateX(18px)}to{opacity:1;transform:none}}
 
@@ -477,9 +477,9 @@ function perfApply(){
   LOWFX = (L===0);
   PERF.base = Math.min(devicePixelRatio, L>=2?1.75:L===1?1.25:1.0);
   PERF.renderDist = L>=2?480:L===1?340:240;
-  PERF.botFar     = L>=2?110:L===1?80:55;
+  PERF.botFar     = L>=2?170:L===1?130:90;      // erst später auf Denk-Throttle umschalten, damit Sniping auf Distanz nicht ruckelt
   PERF.botHide    = PERF.renderDist*0.85;
-  PERF.lodStep    = L>=2?0.10:L===1?0.16:0.24;
+  PERF.lodStep    = L>=2?0.06:L===1?0.10:0.16;  // kürzeres Intervall zwischen Positions-Updates bei weit entfernten Bots
   PERF.fxMax      = L>=2?80:L===1?45:22;
   PERF.fxDist     = L>=2?140:L===1?95:60;
   PERF.targetMs   = 22;
@@ -966,8 +966,10 @@ function house(x,z,w,d,floors,style){
   addBox(box(w+1.2,0.6,d+1.2,x,H,z,style===2?MAT.roof:MAT.roof2),"brick",260);
   // Treppen nach oben
   for(let f=0;f<floors-1;f++){
-    for(let s=0;s<9;s++)
-      addBox(box(2.2,0.4*(s+1)+3.4*f,0.62,x-w/2+1.5,3.4*f,z-d/2+1.2+s*0.62,MAT.plank),"wood",120);
+    for(let s=0;s<9;s++){
+      const stepH=3.4*(s+1)/9;                    // Stufe s erreicht am Ende genau die nächste Etage
+      addBox(box(2.2,stepH,0.62,x-w/2+1.5,3.4*f+stepH/2,z-d/2+1.2+s*0.62,MAT.plank),"wood",120);
+    }
   }
   if(Math.random()<.6)spawnChest(x+rnd(-w/3,w/3),z+rnd(-d/3,d/3));
 }
@@ -1985,7 +1987,7 @@ function spawnBots(n){
     const outfit=OUTFITS[i%OUTFITS.length], skin=SKINS[i%SKINS.length];
     const rig=makeRig(outfit,skin); world.add(rig.root);
     const poi=POIS[i%POIS.length];
-    const skill=clamp(rnd(.35,1.0)*DIFF,.15,1.5);
+    const skill=clamp(rnd(.22,.95)*DIFF*DIFF,.08,1.6);   // DIFF quadratisch, damit "Locker" wirklich locker ist
     const b={
       name:names[i%names.length]+(i>=names.length?" "+(1+Math.floor(i/names.length)):""),
       rig:rig, col:outfit.a,
@@ -2227,7 +2229,7 @@ function damage(e,amount,src,head){
   let left=amount, shieldHit=false;
   if(e.sh>0){const a=Math.min(e.sh,left);e.sh-=a;left-=a;shieldHit=true;}
   e.hp-=left;
-  if(e.using){ e.using=null; e.useT=0; }        // Heilen unterbrechen
+  if(e.using&&src){ e.using=null; e.useT=0; }   // Heilen nur durch echten Beschuss unterbrechen, nicht durch den Sturm
   e.emoteT=0;
   if(e===player){
     player.lastDmgBy=src; flashDamage(); sndDamageTaken(head);
@@ -2516,9 +2518,12 @@ function botSee(b,dt){
   b.scanT=0.15+Math.random()*0.10;
   const gi=botGunSlot(b);
   const gun=gi>0?b.slots[gi]:null;
-  const range=gun?clamp(gun.def.rng,70,170):60;
-  const fx0=-Math.sin(b.yaw), fz0=-Math.cos(b.yaw);
   const list=entityList();
+  // Letztes 1vs1: der einzige übrige Gegner ist immer bekannt, damit der Bot
+  // nicht ziellos herumsteht, sondern gezielt auf ihn zugeht/schießt.
+  const finalDuel=list.length===2;
+  const range=finalDuel?9999:(gun?clamp(gun.def.rng,70,170):60);
+  const fx0=-Math.sin(b.yaw), fz0=-Math.cos(b.yaw);
   _cand.length=0;
   for(let i=0;i<list.length;i++){
     const t=list[i]; if(t===b||!t.alive)continue;
@@ -2526,7 +2531,7 @@ function botSee(b,dt){
     const d=Math.sqrt(dx*dx+dy*dy+dz*dz);
     if(d>range)continue;
     // Nahbereich wird rundum wahrgenommen, weit entfernte nur im Sichtfeld
-    if(d>25 && (fx0*dx+fz0*dz)/d < -0.30)continue;
+    if(!finalDuel && d>25 && (fx0*dx+fz0*dz)/d < -0.30)continue;
     let sc = 2000 - d*22;                 // Entfernung dominiert die Wertung
     if(d<12) sc+=900;                     // direkt vor der Nase
     else if(d<30) sc+=500;
@@ -2548,6 +2553,9 @@ function botSee(b,dt){
   if(best){
     if(b.target!==best)b.reactT=b.react;
     b.target=best; b.lastSeen=best.pos.clone(); b.seenT=4.5; b.targetDist=bd;
+  } else if(finalDuel&&_cand.length){
+    // kein Sichtkontakt, aber im letzten 1vs1 trotzdem Richtung merken statt aufzugeben
+    b.target=_cand[0].t; b.lastSeen=_cand[0].t.pos.clone(); b.seenT=Math.max(b.seenT,1.5);
   } else if(b.seenT<=0) b.target=null;
 }
 function botAim(b,dt,tgt){
@@ -2558,7 +2566,7 @@ function botAim(b,dt,tgt){
   const to=lead.clone().sub(eye);
   const wantYaw=Math.atan2(-to.x,-to.z);
   const wantPitch=Math.atan2(to.y,Math.hypot(to.x,to.z));
-  const sp=(2.5+b.skill*7)*dt;
+  const sp=(0.9+b.skill*8.5)*dt;   // schwächere Bots drehen spürbar langsamer, nicht nur ungenauer
   b.yaw=angLerp(b.yaw,wantYaw,clamp(sp,0,1));
   b.pitch=clamp(lerp(b.pitch,wantPitch,clamp(sp,0,1)),-1.20,1.15);
   const err=Math.abs(((wantYaw-b.yaw+Math.PI)%6.283+6.283)%6.283-Math.PI);
@@ -2572,12 +2580,14 @@ function botAimPoint(b,tgt,dist){
     tgt.z+rnd(-jitter,jitter));
 }
 function botBuildPiece(b,type,dirVec){
-  const save=b.piece, sy=b.yaw;
+  const save=b.piece;
+  // Bot muss erst dahin gucken, wo gebaut wird - Blickrichtung bleibt danach stehen
+  // statt sich unsichtbar sofort wieder zurückzudrehen.
+  if(dirVec&&dirVec.lengthSq()>0.001)b.yaw=angLerp(b.yaw,Math.atan2(-dirVec.x,-dirVec.z),.5);
   b.piece=type;
-  if(dirVec&&dirVec.lengthSq()>0.001)b.yaw=Math.atan2(-dirVec.x,-dirVec.z);
   const t=buildTargetFor(b);
   const ok=placePiece(b,t);
-  b.piece=save; b.yaw=sy;
+  b.piece=save;
   if(ok)b.building=true;
   return ok;
 }
