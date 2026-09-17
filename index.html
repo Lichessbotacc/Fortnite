@@ -1302,6 +1302,7 @@ const MATHP={wood:150,brick:280,metal:460};
 const MATFULL={wood:150,brick:280,metal:460};
 const built=new Map();     // key -> {grp,cols,type,cx,cy,cz,axis,mat,hp}
 const BUILD_COST=10;
+const BUILD_LIMIT=420;     // Obergrenze fuer gleichzeitig stehende Bauteile
 
 function cellOf(x,y,z){ return {cx:Math.floor(x/G),cy:Math.floor(y/G+0.001),cz:Math.floor(z/G)}; }
 function keyFor(type,cx,cy,cz,axis){
@@ -1421,7 +1422,7 @@ function placePiece(e,t,silent){
   if(!canBuild(e,t))return false;
   const mt=e.matSel, mat=matMesh(mt), hp=MATHP[mt];
   const grp=new THREE.Group(); grp.position.copy(t.pos); grp.rotation.y=t.rotY;
-  world.add(grp); grp.updateMatrixWorld(true);
+  staticAdd(grp); grp.updateMatrixWorld(true);
   const cols=[];
   if(t.type==="wall"){
     const m=new THREE.Mesh(BOX,mat); m.scale.set(G-.06,G-.06,.3); grp.add(m);
@@ -1452,7 +1453,7 @@ function placePiece(e,t,silent){
   const rec={grp:grp,cols:cols,type:t.type,mat:mt,key:t.key,hp:hp,maxhp:hp,owner:e};
   cols.forEach(c=>{c.buildRec=rec;});
   built.set(t.key,rec);
-  if(built.size>650){                      // ältestes Bauteil abräumen (FPS-Schutz)
+  if(built.size>BUILD_LIMIT){                      // ältestes Bauteil abräumen (FPS-Schutz)
     const first=built.keys().next().value;
     const old=built.get(first);
     if(old&&old!==rec)destroyBuild(old,true);
@@ -2014,7 +2015,8 @@ function spawnBots(n){
       coverT:0, blockedHard:false,
       ignore:new Set(), harvestBad:new Set(), badClearT:rnd(20,40),
       anchor:null, anchorT:0, forceT:0, forceDir:new THREE.Vector3(), idleMoveT:0,
-      pickT:0, grabT:0, lodAcc:0, lodSkip:false, targetDist:1e9
+      pickT:0, grabT:rnd(0,.45), grabI:ri(0,200),
+      lodAcc:rnd(0,.25), lodSkip:false, targetDist:1e9
     };
     // Kein Startgewehr: jeder Bot geht zuerst auf Waffensuche (wie im echten Match)
     bots.push(b);
@@ -2507,6 +2509,7 @@ function botFindHeal(b){
 }
 /* Zielwahl: Naehe schlaegt alles. Ein Gegner 5 m vor der Nase ist immer
    wichtiger als einer 100 m weit weg — egal welche Waffe der Bot traegt. */
+const _cand=[];
 function botSee(b,dt){
   b.scanT-=dt;
   if(b.scanT>0)return;
@@ -2515,8 +2518,8 @@ function botSee(b,dt){
   const gun=gi>0?b.slots[gi]:null;
   const range=gun?clamp(gun.def.rng,70,170):60;
   const fx0=-Math.sin(b.yaw), fz0=-Math.cos(b.yaw);
-  let best=null,bs=-1e9,bd=0;
   const list=entityList();
+  _cand.length=0;
   for(let i=0;i<list.length;i++){
     const t=list[i]; if(t===b||!t.alive)continue;
     const dx=t.pos.x-b.pos.x, dy=t.pos.y-b.pos.y, dz=t.pos.z-b.pos.z;
@@ -2524,7 +2527,6 @@ function botSee(b,dt){
     if(d>range)continue;
     // Nahbereich wird rundum wahrgenommen, weit entfernte nur im Sichtfeld
     if(d>25 && (fx0*dx+fz0*dz)/d < -0.30)continue;
-    if(!hasLOS(b.pos,t.pos))continue;
     let sc = 2000 - d*22;                 // Entfernung dominiert die Wertung
     if(d<12) sc+=900;                     // direkt vor der Nase
     else if(d<30) sc+=500;
@@ -2532,7 +2534,16 @@ function botSee(b,dt){
     if(t===b.target) sc+=70;              // kleine Hysterese gegen Zielflackern
     if(t.isPlayer) sc+=30;
     if(t.hp+t.sh<45) sc+=120;             // angeschlagene Gegner zuerst
-    if(sc>bs){bs=sc;best=t;bd=d;}
+    _cand.push({t:t,d:d,sc:sc});
+  }
+  /* Sichtlinien sind teuer. Darum erst sortieren und nur die besten paar
+     Kandidaten pruefen — vorher wurde fuer JEDEN Gegner ein Strahl geschossen,
+     was beim Landen aller Bots zu massiven Rucklern gefuehrt hat. */
+  _cand.sort((a,c)=>c.sc-a.sc);
+  let best=null,bd=0;
+  const lim=Math.min(_cand.length,4);
+  for(let i=0;i<lim;i++){
+    if(hasLOS(b.pos,_cand[i].t.pos)){ best=_cand[i].t; bd=_cand[i].d; break; }
   }
   if(best){
     if(b.target!==best)b.reactT=b.react;
@@ -2683,7 +2694,7 @@ let buildFighters=0, buildFightT=0;
 function botBuildFightStep(b,dt,to){
   const S=b.buildUp;
   S.life+=dt;
-  if(S.life>16||S.fail>6||S.left<=0||!botPickMat(b,false)||built.size>600){
+  if(S.life>16||S.fail>6||S.left<=0||!botPickMat(b,false)||built.size>BUILD_LIMIT*0.95){
     b.buildUp=null; b.buildCD=rnd(1.0,2.6); return;
   }
   const dir=new THREE.Vector3(Math.cos(S.ang),0,Math.sin(S.ang));
@@ -2894,6 +2905,13 @@ function botFight(b,dt){
     botFlee(b,dt); return;
   }
 
+  /* Sinnvolle Kampfentfernung der aktuellen Waffe. Mit Schrotflinte oder
+     Sturmgewehr wird nicht mehr quer ueber die Karte gefeuert. */
+  const longOK = w.def.scope || w.def.rng>190;
+  const maxEngage = w.def.pellets ? Math.min(w.def.rng,20)
+                  : longOK ? w.def.rng
+                  : Math.min(w.def.rng,62);
+
   // Heilen nur, wenn wirklich sicher (kein Sichtkontakt, weit weg)
   if(b.hp<45&&!los&&d>45&&b.retreat<=0){
     const hi=botFindHeal(b);
@@ -2928,7 +2946,7 @@ function botFight(b,dt){
   if(b.buildUp){ botBuildFightStep(b,dt,to); }
   b.buildCD-=dt;
   if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&los&&dist>5&&dist<80&&
-     botMats(b)>=BUILD_COST*5&&built.size<520&&
+     botMats(b)>=BUILD_COST*5&&built.size<BUILD_LIMIT*0.8&&
      (b.hurtT>0||tgt.pos.y>b.pos.y+2||Math.random()<0.7)){
     // Duell: sofort hochbauen und Höhe erkämpfen
     b.buildUp={ang:Math.atan2(to.z,to.x)+rnd(-.3,.3),phase:"floor",left:ri(5,10),
@@ -2959,12 +2977,7 @@ function botFight(b,dt){
   // Material knapp? Nur farmen, wenn weit weg vom Gegner
   if(botMats(b)<40&&dist>60){ botHarvest(b,dt); }
 
-  // Schießen — aber nur auf Entfernungen, die zur Waffe passen.
-  // Mit Schrotflinte oder Sturmgewehr wird nicht mehr quer ueber die Karte gefeuert.
-  const longOK = w.def.scope || w.def.rng>190;
-  const maxEngage = w.def.pellets ? Math.min(w.def.rng,20)
-                  : longOK ? w.def.rng
-                  : Math.min(w.def.rng,62);
+  // Schießen — nur auf Entfernungen, die zur Waffe passen (siehe maxEngage oben)
   if(los&&b.reactT<=0&&b.cool<=0&&b.reloading<=0&&dist<maxEngage&&aimErr<0.12+(1-b.skill)*0.2){
     const ap=botAimPoint(b,tgt.pos,dist);
     if(shootWeapon(b,ap)){
@@ -3062,9 +3075,9 @@ function botIdle(b,dt,stormDist){
         return;
       }
     } else if(b.farmScanT<=0){
-      b.farmScanT=rnd(3,6);
-      const near=nearbyR(b.pos.x,b.pos.z,55);
-      let bd=55,best=null;
+      b.farmScanT=rnd(4,8);
+      const near=nearbyR(b.pos.x,b.pos.z,38);
+      let bd=38,best=null;
       for(const c of near){
         if(!c.res)continue;
         const cx=(c.min.x+c.max.x)/2,cz=(c.min.z+c.max.z)/2;
@@ -3084,7 +3097,7 @@ function botIdle(b,dt,stormDist){
   /* --- Looten --- */
   b.lootT-=dt;
   if(b.lootT<=0){
-    b.lootT=1.4; b.lootGoal=null;
+    b.lootT=b.lodSkip?3.2:1.4; b.lootGoal=null;
     let bd=b.looter*70+20;
     for(const c of chests) if(!c.open){
       const d=Math.hypot(c.x-b.pos.x,c.z-b.pos.z);
@@ -3232,7 +3245,7 @@ function botAvoid(b,dt){
   }
   if(botPathFree(b,b.moveDir,1.1)){ b.avoidT=0; return; }
   // seitlich ausweichen — findet auch Türöffnungen in Häusern
-  const angles=[0.5,1.0,1.6,2.2,2.8];
+  const angles=[0.6,1.25,2.0,2.7];
   const d0=b.moveDir.clone();
   const pref=b.avoidSide||1; b.avoidSide=pref;
   const list=[];
@@ -3267,8 +3280,11 @@ function finishBotFrame(b,dt){
   b.grabT=(b.grabT||0)-dt;
   if(b.grabT<=0){
     b.grabT=0.45;
-    for(let i=lootItems.length-1;i>=0;i--){
-      const l=lootItems[i], q=l.mesh.position;
+    const n=lootItems.length, scan=Math.min(n,70);
+    b.grabI=((b.grabI||0)+scan)%Math.max(1,n);
+    for(let k=0;k<scan;k++){
+      const l=lootItems[(b.grabI+k)%n]; if(!l)continue;
+      const q=l.mesh.position;
       const dx=q.x-b.pos.x, dz=q.z-b.pos.z;
       if(dx*dx+dz*dz<5.3&&Math.abs(q.y-b.pos.y)<3.2&&botWants(b,l.item)){ botCollect(b,{loot:l}); break; }
     }
@@ -3998,12 +4014,26 @@ function endMatch(win){
 /* ======================================================================
    LOOP
    ====================================================================== */
-let botTick=0;
+let botTick=0, frameNo=0;
 function tick(){
   requestAnimationFrame(tick);
   const dt=Math.min(clock.getDelta(),.05);
   perfAdapt(dt);
   _entDirty=true;
+  try{ simulate(dt); }
+  catch(err){ tickError(err); }        // niemals den Frame abbrechen -> kein Standbild
+  try{ drawFrame(dt); }
+  catch(err){ tickError(err); }
+  try{ renderer.render(scene,camera); }   // gerendert wird IMMER
+  catch(err){ tickError(err); }
+}
+let _errCount=0;
+function tickError(err){
+  _errCount++;
+  if(_errCount<6)console.error("Simulationsfehler:",err);
+  if(_errCount===30)console.error("Viele Simulationsfehler — Spiel laeuft weiter.");
+}
+function simulate(dt){
   if(running&&!paused){
     if(phase==="drop")updateDrop(dt);
     else if(phase==="play")updatePlay(dt);
@@ -4012,6 +4042,8 @@ function tick(){
        Das ist der groesste Gewinn bei vielen Gegnern. */
     const cpos=camera?camera.position:null;
     const near2=PERF.botFar*PERF.botFar, hide2=PERF.botHide*PERF.botHide;
+    const stride = bots.length>60?3 : bots.length>28?2 : 1;
+    frameNo++; const slot=frameNo%stride;
     for(let i=0;i<bots.length;i++){
       const b=bots[i]; if(!b.alive)continue;
       let d2=0;
@@ -4019,17 +4051,19 @@ function tick(){
       const far=d2>near2;
       b.lodSkip = d2>hide2*0.36;
       if(b.rig)b.rig.root.visible = d2<hide2;
-      if(!far){ updateBot(b,dt); b.lodAcc=0; }
-      else {
-        b.lodAcc=(b.lodAcc||0)+dt;
-        if(b.lodAcc>=PERF.lodStep){ updateBot(b,Math.min(b.lodAcc,0.2)); b.lodAcc=0; }
-      }
+      b.lodAcc=(b.lodAcc||0)+dt;
+      // Nahe Bots auf mehrere Frames verteilen, damit nicht alle im selben
+      // Bild rechnen — das war die Ursache der Ruckler beim Landen.
+      const step = far ? PERF.lodStep : (i%stride===slot ? 0 : 1e9);
+      if(b.lodAcc>=step){ updateBot(b,Math.min(b.lodAcc,0.2)); b.lodAcc=-Math.random()*0.03; }
     }
     updateStorm(dt);
     updateProjectiles(dt);
     if(collapseCD>0)collapseCD-=dt;
     if(collapseT>0){collapseT-=dt;if(collapseT<=0&&collapseCD<=0)runCollapse();}
   }
+}
+function drawFrame(dt){
   // Kamera
   if(phase==="spectate"&&spec.target) applyThirdPerson(spec.target,dt);
   else if(player.rig) applyThirdPerson(player,dt);
@@ -4053,7 +4087,6 @@ function tick(){
   }
   if(dmgT>0){dmgT-=dt; if(dmgT<=0)el("damage").style.boxShadow="inset 0 0 120px rgba(255,40,30,0)";}
   if(zoneTimer>0){zoneTimer-=dt; if(zoneTimer<=0)el("zoneMsg").style.opacity=0;}
-  renderer.render(scene,camera);
 }
 
 /* ======================================================================
