@@ -269,6 +269,11 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
         </select>
       </label>
       <label>Sensitivität <input type="range" id="optSens" min="20" max="300" value="100"></label>
+      <label>Grafik
+        <select id="optQual" style="font-family:'Barlow Condensed';font-size:18px;padding:6px;background:#0f1a24;color:#e8f1f7;border:1px solid var(--line)">
+          <option value="auto" selected>Automatisch</option><option value="low">Niedrig (schwacher PC)</option><option value="med">Mittel</option><option value="high">Hoch</option>
+        </select>
+      </label>
     </div>
     <button id="btnStart">Match starten</button>
     <button id="btnEditControls" class="ghost" style="background:transparent;color:var(--ink);border:1px solid var(--line);margin-left:12px">Touch-Steuerung anpassen</button>
@@ -449,15 +454,67 @@ addEventListener("mousedown",e=>{
   BINDS[rebindWaiting]="Mouse"+e.button; saveBinds();
   rebindWaiting=null; renderBindList(); renderKeysList();
 },true);
-const LOWFX=TOUCH;
+/* ======================================================================
+   PERFORMANCE — Qualitaetsstufen, dynamische Aufloesung, Chunk-Culling
+   ====================================================================== */
+const HWC=(navigator.hardwareConcurrency||4);
+const WEAK_HW = TOUCH || HWC<=4 || /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent||"");
+let LOWFX = WEAK_HW;
+const PERF={
+  mode:"auto",          // auto | high | med | low
+  level:WEAK_HW?0:2,    // 0 niedrig, 1 mittel, 2 hoch
+  scale:1,              // Aufloesungs-Faktor (dynamisch)
+  base:1,               // Basis-PixelRatio der Stufe
+  frameMs:16, targetMs:22, adaptT:0,
+  renderDist:380,       // ab hier werden Chunks komplett ausgeblendet
+  botFar:105,           // Bots weiter weg -> KI laeuft langsamer
+  botHide:300,          // Bots weiter weg -> gar nicht zeichnen
+  lodStep:0.12,         // KI-Schritt fuer weit entfernte Bots
+  fxMax:70, fxDist:130
+};
+function perfApply(){
+  const L=PERF.level;
+  LOWFX = (L===0);
+  PERF.base = Math.min(devicePixelRatio, L>=2?1.75:L===1?1.25:1.0);
+  PERF.renderDist = L>=2?380:L===1?270:190;
+  PERF.botFar     = L>=2?110:L===1?80:55;
+  PERF.botHide    = PERF.renderDist*0.85;
+  PERF.lodStep    = L>=2?0.10:L===1?0.16:0.24;
+  PERF.fxMax      = L>=2?80:L===1?45:22;
+  PERF.fxDist     = L>=2?140:L===1?95:60;
+  PERF.targetMs   = 22;
+  if(renderer)renderer.setPixelRatio(PERF.base*PERF.scale);
+  if(scene&&scene.fog)scene.fog.density = 2.15/PERF.renderDist;
+  if(camera){ camera.far = PERF.renderDist+220; camera.updateProjectionMatrix(); }
+}
+function perfSetMode(m){
+  PERF.mode=m;
+  PERF.level = m==="high"?2 : m==="med"?1 : m==="low"?0 : (WEAK_HW?0:2);
+  PERF.scale = 1;
+  perfApply();
+}
+/* Misst die Bildzeit und senkt bei Bedarf Aufloesung und Sichtweite */
+function perfAdapt(dt){
+  PERF.frameMs = PERF.frameMs*0.88 + (dt*1000)*0.12;
+  PERF.adaptT-=dt; if(PERF.adaptT>0)return;
+  PERF.adaptT=0.5;
+  if(PERF.mode!=="auto")return;
+  const t=PERF.targetMs;
+  if(PERF.frameMs>t*1.30){
+    if(PERF.scale>0.55){ PERF.scale=Math.max(0.55,PERF.scale-0.10); renderer.setPixelRatio(PERF.base*PERF.scale); }
+    else if(PERF.level>0){ PERF.level--; PERF.scale=0.8; perfApply(); }
+  } else if(PERF.frameMs<t*0.70){
+    if(PERF.scale<1){ PERF.scale=Math.min(1,PERF.scale+0.06); renderer.setPixelRatio(PERF.base*PERF.scale); }
+  }
+}
 
 function initGfx(){
   scene=new THREE.Scene();
   scene.background=new THREE.Color(0xa8d2ec);
   scene.fog=new THREE.FogExp2(0xa8d2ec,0.0021);
   camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.08,1400);
-  renderer=new THREE.WebGLRenderer({antialias:!LOWFX,powerPreference:"high-performance"});
-  renderer.setPixelRatio(Math.min(devicePixelRatio,LOWFX?1.25:2));
+  renderer=new THREE.WebGLRenderer({antialias:!LOWFX,powerPreference:"high-performance",stencil:false});
+  renderer.setPixelRatio(Math.min(devicePixelRatio,LOWFX?1:1.75));
   renderer.setSize(innerWidth,innerHeight);
   if(THREE.sRGBEncoding!==undefined)renderer.outputEncoding=THREE.sRGBEncoding;
   document.body.insertBefore(renderer.domElement,document.body.firstChild);
@@ -470,15 +527,19 @@ function initGfx(){
   const sky=new THREE.Mesh(new THREE.SphereGeometry(700,24,16),skyMat); scene.add(sky);
   // Wolken
   const cloudMat=new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.55,depthWrite:false});
-  for(let i=0;i<(LOWFX?10:22);i++){
+  for(let i=0;i<(LOWFX?8:18);i++){
     const c=new THREE.Mesh(new THREE.SphereGeometry(rnd(18,42),7,5),cloudMat);
     c.position.set(rnd(-420,420),rnd(150,230),rnd(-420,420)); c.scale.y=0.36; scene.add(c);
   }
   scene.add(new THREE.HemisphereLight(0xdcefff,0x54683c,0.95));
   const sun=new THREE.DirectionalLight(0xfff4e0,1.05); sun.position.set(140,200,80); scene.add(sun);
   const sun2=new THREE.DirectionalLight(0x8fb4ff,0.3); sun2.position.set(-110,70,-90); scene.add(sun2);
-  const rim=new THREE.DirectionalLight(0xffd9a0,0.22); rim.position.set(0,40,160); scene.add(rim);
+  if(!LOWFX){ const rim=new THREE.DirectionalLight(0xffd9a0,0.22); rim.position.set(0,40,160); scene.add(rim); }
+  // Feste Licht-Pool fuer Muendungsfeuer/Explosionen. Lichter zur Laufzeit
+  // hinzuzufuegen laesst THREE alle Materialien neu kompilieren -> Ruckler.
+  for(let i=0;i<3;i++){ const l=new THREE.PointLight(0xffca6a,0,14); l.visible=false; scene.add(l); PLIGHTS.push(l); }
   clock=new THREE.Clock();
+  perfApply();
   addEventListener("resize",()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
 }
 
@@ -501,26 +562,19 @@ function gridRemove(c){
   c.cells=null;
 }
 const NEAR=[];
-function nearby(x,z){
-  NEAR.length=0;
-  const i0=Math.floor((x-1.2)/CELL),i1=Math.floor((x+1.2)/CELL);
-  const j0=Math.floor((z-1.2)/CELL),j1=Math.floor((z+1.2)/CELL);
-  for(let i=i0;i<=i1;i++)for(let j=j0;j<=j1;j++){
-    const a=grid.get(ckey(i,j)); if(!a)continue;
-    for(let k=0;k<a.length;k++) if(NEAR.indexOf(a[k])<0) NEAR.push(a[k]);
-  }
-  return NEAR;
-}
+let _nStamp=0;
+/* Doppelte Treffer per Stempel filtern statt per indexOf -> aus O(n*n) wird O(n) */
 function nearbyR(x,z,r){
-  NEAR.length=0;
+  NEAR.length=0; _nStamp++;
   const i0=Math.floor((x-r)/CELL),i1=Math.floor((x+r)/CELL);
   const j0=Math.floor((z-r)/CELL),j1=Math.floor((z+r)/CELL);
   for(let i=i0;i<=i1;i++)for(let j=j0;j<=j1;j++){
     const a=grid.get(ckey(i,j)); if(!a)continue;
-    for(let k=0;k<a.length;k++) if(NEAR.indexOf(a[k])<0) NEAR.push(a[k]);
+    for(let k=0;k<a.length;k++){ const c=a[k]; if(c._ns===_nStamp)continue; c._ns=_nStamp; NEAR.push(c); }
   }
   return NEAR;
 }
+function nearby(x,z){ return nearbyR(x,z,1.2); }
 function addBox(mesh,res,hp,structure,noRay,noClip){
   if(mesh.parent)mesh.parent.updateWorldMatrix(true,false);
   mesh.updateWorldMatrix(true,true);
@@ -611,13 +665,39 @@ const GEO={
   beam:new THREE.CylinderGeometry(.34,.34,7,6,1,true),
   chestGlow:new THREE.CylinderGeometry(.9,.9,6,8,1,true)
 };
+/* ---- Statische Welt in Chunks: ganze Bloecke lassen sich in einem Rutsch
+   ausblenden. Das spart auf schwachen Rechnern die meisten Draw-Calls. ---- */
+const CHUNK=48;
+let chunks=new Map(), chunkList=[];
+function chunkFor(x,z){
+  const i=Math.floor(x/CHUNK), j=Math.floor(z/CHUNK), k=i*10007+j;
+  let g=chunks.get(k);
+  if(!g){
+    g=new THREE.Group(); g.userData.cx=i*CHUNK+CHUNK/2; g.userData.cz=j*CHUNK+CHUNK/2;
+    chunks.set(k,g); chunkList.push(g); world.add(g);
+  }
+  return g;
+}
+function staticAdd(m){ chunkFor(m.position.x,m.position.z).add(m); return m; }
+let cullT=0;
+function updateChunks(dt){
+  cullT-=dt; if(cullT>0)return; cullT=0.22;
+  if(!camera)return;
+  const cp=camera.position, r2=PERF.renderDist*PERF.renderDist;
+  for(let i=0;i<chunkList.length;i++){
+    const g=chunkList[i];
+    const dx=g.userData.cx-cp.x, dz=g.userData.cz-cp.z;
+    g.visible = dx*dx+dz*dz < r2;
+  }
+}
 function box(w,h,d,x,y,z,m){
-  const me=new THREE.Mesh(BOX,m); me.scale.set(w,h,d); me.position.set(x,y+h/2,z); world.add(me); return me;
+  const me=new THREE.Mesh(BOX,m); me.scale.set(w,h,d); me.position.set(x,y+h/2,z); staticAdd(me); return me;
 }
 const chests=[], lootItems=[], POIS=[], ammoBoxes=[];
 
 function buildWorld(){
   world=new THREE.Group(); scene.add(world);
+  chunks=new Map(); chunkList.length=0;
   colliders.length=0; hitMeshes.length=0; chests.length=0; lootItems.length=0;
   POIS.length=0; ammoBoxes.length=0; grid.clear();
 
@@ -626,7 +706,7 @@ function buildWorld(){
   for(let i=0;i<30;i++){
     const r=rnd(12,38), p=new THREE.Mesh(new THREE.CircleGeometry(r,10),
       pick([MAT.grass2,MAT.dirt,MAT.sand]));
-    p.rotation.x=-Math.PI/2; p.position.set(rnd(-HALF,HALF),0.02,rnd(-HALF,HALF)); world.add(p);
+    p.rotation.x=-Math.PI/2; p.position.set(rnd(-HALF,HALF),0.02,rnd(-HALF,HALF)); staticAdd(p);
   }
   const wallM=M(0x3a4a60);
   [[MAP,8,2,0,0,-HALF],[MAP,8,2,0,0,HALF],[2,8,MAP,-HALF,0,0],[2,8,MAP,HALF,0,0]]
@@ -641,7 +721,7 @@ function buildWorld(){
   }
   POIS.forEach((p,i)=>makePOI(p.x,p.z,i,p.type));
 
-  const deco=Math.round(LOWFX?420:760);
+  const deco=Math.round(PERF.level>=2?760:PERF.level===1?520:330);
   for(let i=0;i<deco;i++){
     const x=rnd(-HALF+6,HALF-6),z=rnd(-HALF+6,HALF-6);
     if(spots.some(s=>Math.hypot(s.x-x,s.y-z)<28))continue;
@@ -676,37 +756,37 @@ function buildWorld(){
 }
 function crater(cx,cz){
   const c=new THREE.Mesh(new THREE.CircleGeometry(32,24),MAT.dirt);
-  c.rotation.x=-Math.PI/2; c.position.set(cx,0.04,cz); world.add(c);
+  c.rotation.x=-Math.PI/2; c.position.set(cx,0.04,cz); staticAdd(c);
   for(let i=0;i<10;i++){
     const a=i/10*6.283, d=rnd(10,26);
     const s=rnd(1.4,3.0);
     const m=new THREE.Mesh(GEO.rock,M(0x6a7a86)); m.scale.setScalar(s);
     m.position.set(cx+Math.cos(a)*d,s*.5,cz+Math.sin(a)*d);
-    m.rotation.set(rnd(0,3),rnd(0,3),rnd(0,3)); world.add(m); addBox(m,"brick",140);
+    m.rotation.set(rnd(0,3),rnd(0,3),rnd(0,3)); staticAdd(m); addBox(m,"brick",140);
   }
 }
 function tree(x,z){
   const h=rnd(5,9);
   const t=new THREE.Mesh(GEO.trunk,MAT.trunk);
-  t.scale.set(1,h,1); t.position.set(x,h/2,z); world.add(t);
+  t.scale.set(1,h,1); t.position.set(x,h/2,z); staticAdd(t);
   const r=rnd(2.2,3.4);
   const l=new THREE.Mesh(GEO.leaf,Math.random()<.5?MAT.leaf:MAT.leaf2);
   l.scale.set(r,r*0.82,r);
-  l.position.set(x,h+1.2,z); world.add(l);
+  l.position.set(x,h+1.2,z); staticAdd(l);
   const c=addBox(t,"wood",110); c.extra=l;
 }
 function bush(x,z){
   const s=rnd(1.1,1.9);
   const m=new THREE.Mesh(GEO.bush,MAT.leaf);
   m.scale.set(s,s*.7,s);
-  m.position.set(x,s*.7,z); world.add(m);
+  m.position.set(x,s*.7,z); staticAdd(m);
   addBox(m,"wood",50);
 }
 function rock(x,z){
   const s=rnd(1.6,3.4);
   const m=new THREE.Mesh(GEO.rock,MAT.rock);
   m.scale.setScalar(s);
-  m.position.set(x,s*0.55,z); m.rotation.set(rnd(0,3),rnd(0,3),rnd(0,3)); world.add(m);
+  m.position.set(x,s*0.55,z); m.rotation.set(rnd(0,3),rnd(0,3),rnd(0,3)); staticAdd(m);
   addBox(m,"brick",140);
 }
 /* Kapitel 1 / Saison 4 — alle benannten Orte, Lage wie auf der Originalkarte
@@ -766,8 +846,8 @@ function makePOI(cx,cz,seed,type){
   const n=cfg.n;
   if(cfg.road){
     const road=new THREE.Mesh(new THREE.PlaneGeometry(cfg.r*2.4,9),MAT.road);
-    road.rotation.x=-Math.PI/2; road.position.set(cx,0.03,cz); world.add(road);
-    const road2=road.clone(); road2.rotation.z=Math.PI/2; world.add(road2);
+    road.rotation.x=-Math.PI/2; road.position.set(cx,0.03,cz); staticAdd(road);
+    const road2=road.clone(); road2.rotation.z=Math.PI/2; staticAdd(road2);
   }
   for(let i=0;i<n;i++){
     const a=(i/n)*6.283+rnd(-.35,.35), d=i===0?rnd(0,6):rnd(cfg.r*0.45,cfg.r);
@@ -778,7 +858,7 @@ function makePOI(cx,cz,seed,type){
   /* Besonderheiten der einzelnen Orte */
   if(type==="lake"){
     const wm=new THREE.Mesh(new THREE.CircleGeometry(46,28),MAT.water);
-    wm.rotation.x=-Math.PI/2; wm.position.set(cx,0.06,cz); world.add(wm);
+    wm.rotation.x=-Math.PI/2; wm.position.set(cx,0.06,cz); staticAdd(wm);
     house(cx,cz,12,12,2,1);                               // Haus auf der Insel
   }
   if(type==="divot")crater(cx,cz);
@@ -800,7 +880,7 @@ function makePOI(cx,cz,seed,type){
     }
     if(type==="mire"){
       const wm=new THREE.Mesh(new THREE.CircleGeometry(40,20),MAT.water);
-      wm.rotation.x=-Math.PI/2; wm.position.set(cx,0.05,cz); world.add(wm);
+      wm.rotation.x=-Math.PI/2; wm.position.set(cx,0.05,cz); staticAdd(wm);
     }
   }
   if(type==="shafts"){
@@ -821,7 +901,7 @@ function makePOI(cx,cz,seed,type){
     warehouse(cx+rnd(-10,10),cz+rnd(-10,10),22,16,8,MAT.wall3);
     for(let i=0;i<6;i++){
       const f=new THREE.Mesh(new THREE.PlaneGeometry(22,14),MAT.dirt);
-      f.rotation.x=-Math.PI/2; f.position.set(cx+rnd(-38,38),0.04,cz+rnd(-38,38)); world.add(f);
+      f.rotation.x=-Math.PI/2; f.position.set(cx+rnd(-38,38),0.04,cz+rnd(-38,38)); staticAdd(f);
     }
   }
   if(type==="haunted"){                                    // Friedhof
@@ -1152,6 +1232,7 @@ function animRig(e,dt){
   const rig=e.rig; if(!rig)return;
   rig.root.position.set(e.pos.x,e.pos.y,e.pos.z);
   rig.yaw.rotation.y=e.yaw;
+  if(e.lodSkip)return;          // weit weg: nur Position, keine Gliedmassen-Animation
   if(rig.blob){
     const gy=groundAt(e.pos.x,e.pos.z,e.pos.y+0.2);
     const h=clamp(e.pos.y-gy,0,6);
@@ -1448,63 +1529,108 @@ function portAFort(x,z){
    ====================================================================== */
 const fx=[];                       // {o,t,life,kind}
 const FLASHGEO=new THREE.PlaneGeometry(1,1);
+const PLIGHTS=[];                  // feste Lichter, werden nur ein-/ausgeschaltet
+const _flashPool=[], _linePool=[];
+const _fxv=new THREE.Vector3();
+/* Ist der Effekt ueberhaupt in Sichtweite? Weit entfernte Effekte werden
+   gar nicht erst erzeugt — das spart auf schwachen Rechnern enorm viel. */
+function fxNear(pos,mul){
+  if(!camera)return false;
+  if(fx.length>PERF.fxMax)return false;
+  const d=PERF.fxDist*(mul||1);
+  const dx=pos.x-camera.position.x, dy=pos.y-camera.position.y, dz=pos.z-camera.position.z;
+  return dx*dx+dy*dy+dz*dz < d*d;
+}
+function flashMesh(col,op){
+  let m=_flashPool.pop();
+  if(!m)m=new THREE.Mesh(FLASHGEO,new THREE.MeshBasicMaterial({transparent:true,depthWrite:false,side:THREE.DoubleSide}));
+  m.material.color.setHex(col); m.material.opacity=op; m.visible=true; m.rotation.set(0,0,0);
+  return m;
+}
 function addFx(o,life,kind,data){ fx.push(Object.assign({o:o,t:life,life:life,kind:kind},data||{})); }
+function flashLight(pos,col,inten,dist,life){
+  if(LOWFX)return;
+  for(let i=0;i<PLIGHTS.length;i++){
+    const l=PLIGHTS[i];
+    if(!l.visible){ l.visible=true; l.color.setHex(col); l.intensity=inten; l.distance=dist;
+      l.position.copy(pos); addFx(l,life,"light",{i0:inten}); return; }
+  }
+}
 function muzzleFlash(pos,dir,scale){
-  const m=new THREE.Mesh(FLASHGEO,new THREE.MeshBasicMaterial({color:0xffe08a,transparent:true,
-    opacity:.95,depthWrite:false,side:THREE.DoubleSide}));
+  if(!fxNear(pos,1.6))return;
+  const m=flashMesh(0xffe08a,.95);
   m.position.copy(pos); m.scale.setScalar((scale||1)*0.9);
-  m.lookAt(pos.clone().add(dir));
+  _fxv.copy(pos).add(dir); m.lookAt(_fxv);
   m.rotation.z=rnd(0,6.28);
-  world.add(m); addFx(m,.06,"flash");
-  const l=new THREE.PointLight(0xffca6a,2.2,12); l.position.copy(pos); world.add(l); addFx(l,.06,"light");
+  world.add(m); addFx(m,.06,"flash",{pool:1});
+  flashLight(pos,0xffca6a,2.2,12,.06);
 }
 function tracer(a,b,col){
-  const g=new THREE.BufferGeometry().setFromPoints([a,b]);
-  const l=new THREE.Line(g,new THREE.LineBasicMaterial({color:col||0xfff0b0,transparent:true,opacity:.9}));
-  world.add(l); addFx(l,.08,"tracer");
+  if(!fxNear(a,2.2))return;
+  let l=_linePool.pop();
+  if(!l)l=new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]),
+        new THREE.LineBasicMaterial({transparent:true}));
+  const pa=l.geometry.attributes.position;
+  pa.setXYZ(0,a.x,a.y,a.z); pa.setXYZ(1,b.x,b.y,b.z); pa.needsUpdate=true;
+  l.geometry.computeBoundingSphere();
+  l.material.color.setHex(col||0xfff0b0); l.material.opacity=.9; l.visible=true;
+  world.add(l); addFx(l,.08,"tracer",{line:1});
 }
 function impact(p,n){
-  const m=new THREE.Mesh(FLASHGEO,new THREE.MeshBasicMaterial({color:0xffd9a0,transparent:true,
-    opacity:.9,depthWrite:false,side:THREE.DoubleSide}));
-  m.position.copy(p); m.scale.setScalar(.35); m.lookAt(p.clone().add(n||new THREE.Vector3(0,1,0)));
-  world.add(m); addFx(m,.12,"flash");
+  if(!fxNear(p))return;
+  const m=flashMesh(0xffd9a0,.9);
+  m.position.copy(p); m.scale.setScalar(.35);
+  _fxv.copy(p).add(n||{x:0,y:1,z:0}); m.lookAt(_fxv);
+  world.add(m); addFx(m,.12,"flash",{pool:1});
 }
 function bloodHit(p){
-  const m=new THREE.Mesh(FLASHGEO,new THREE.MeshBasicMaterial({color:0xff5a4d,transparent:true,
-    opacity:.8,depthWrite:false,side:THREE.DoubleSide}));
-  m.position.copy(p); m.scale.setScalar(.5); world.add(m); addFx(m,.16,"billboard");
+  if(!fxNear(p,1.4))return;
+  const m=flashMesh(0xff5a4d,.8);
+  m.position.copy(p); m.scale.setScalar(.5); world.add(m); addFx(m,.16,"billboard",{pool:1});
 }
 function shell(pos){
-  if(LOWFX)return;
+  if(LOWFX||!fxNear(pos,.45))return;
   const m=new THREE.Mesh(BOX,GMAT.tan); m.scale.set(.05,.05,.1); m.position.copy(pos);
   world.add(m); addFx(m,.9,"shell",{v:new THREE.Vector3(rnd(-1.5,1.5),rnd(2,3.5),rnd(-1.5,1.5))});
 }
 function puff(pos,mt){
+  if(!fxNear(pos))return;
   const col=mt==="wood"?0xc98a46:mt==="brick"?0xb4715a:mt==="metal"?0x8fa0ad:0xcccccc;
-  const m=new THREE.Mesh(FLASHGEO,new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:.55,depthWrite:false,side:THREE.DoubleSide}));
-  m.position.copy(pos); m.scale.setScalar(2.4); world.add(m); addFx(m,.25,"billboard");
+  const m=flashMesh(col,.55);
+  m.position.copy(pos); m.scale.setScalar(2.4); world.add(m); addFx(m,.25,"billboard",{pool:1});
 }
 function explosionFx(pos,r){
-  const m=new THREE.Mesh(new THREE.SphereGeometry(1,10,8),new THREE.MeshBasicMaterial({color:0xffa53c,transparent:true,opacity:.8,depthWrite:false}));
+  const m=new THREE.Mesh(new THREE.SphereGeometry(1,8,6),new THREE.MeshBasicMaterial({color:0xffa53c,transparent:true,opacity:.8,depthWrite:false}));
   m.position.copy(pos); m.scale.setScalar(r*.4); world.add(m); addFx(m,.35,"boom",{r:r});
-  const l=new THREE.PointLight(0xffa53c,4,r*3); l.position.copy(pos); world.add(l); addFx(l,.25,"light");
+  flashLight(pos,0xffa53c,4,r*3,.25);
 }
 function updateFx(dt){
   for(let i=fx.length-1;i>=0;i--){
     const f=fx[i]; f.t-=dt; const k=clamp(f.t/f.life,0,1);
     if(f.kind==="flash"||f.kind==="tracer"||f.kind==="billboard"){ if(f.o.material)f.o.material.opacity=k*.95; }
     if(f.kind==="billboard"&&camera)f.o.lookAt(camera.position);
-    if(f.kind==="light")f.o.intensity=k*2.2;
+    if(f.kind==="light")f.o.intensity=k*(f.i0||2.2);
     if(f.kind==="boom"){ f.o.scale.setScalar(f.r*(0.4+(1-k)*1.1)); f.o.material.opacity=k*.8; }
     if(f.kind==="shell"){ f.v.y-=22*dt; f.o.position.addScaledVector(f.v,dt); f.o.rotation.x+=dt*9; }
-    if(f.t<=0){ if(f.o.parent)f.o.parent.remove(f.o); fx.splice(i,1); }
+    if(f.t<=0){
+      if(f.kind==="light"){ f.o.visible=false; f.o.intensity=0; }
+      else {
+        if(f.o.parent)f.o.parent.remove(f.o);
+        if(f.pool&&_flashPool.length<60)_flashPool.push(f.o);
+        else if(f.line&&_linePool.length<30)_linePool.push(f.o);
+        else if(!f.pool&&!f.line&&f.o.geometry&&f.kind==="boom")f.o.geometry.dispose();
+      }
+      fx.splice(i,1);
+    }
   }
 }
 /* Schadenszahlen */
 const dmgNumsEl=()=>el("dmgNums");
 const _pv=new THREE.Vector3();
+let _dnum=0;
 function dmgNumber(pos,amount,head,shield){
   if(!camera)return;
+  if(_dnum>26)return;
   _pv.copy(pos); _pv.project(camera);
   if(_pv.z>1)return;
   const d=document.createElement("div");
@@ -1512,8 +1638,8 @@ function dmgNumber(pos,amount,head,shield){
   d.textContent=Math.round(amount);
   d.style.left=((_pv.x*.5+.5)*innerWidth)+"px";
   d.style.top=((-_pv.y*.5+.5)*innerHeight)+"px";
-  dmgNumsEl().appendChild(d);
-  setTimeout(()=>d.remove(),1000);
+  dmgNumsEl().appendChild(d); _dnum++;
+  setTimeout(()=>{d.remove();_dnum--;},1000);
 }
 
 /* ======================================================================
@@ -1750,7 +1876,7 @@ function spawnFloor(item,x,z,y){
   const beam=new THREE.Mesh(GEO.beam,
     new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:.16,depthWrite:false,side:THREE.DoubleSide}));
   beam.position.y=3.2; g.add(beam); g.userData.beam=beam;
-  g.position.set(x,(y||0)+0.7,z); world.add(g);
+  g.position.set(x,(y||0)+0.7,z); staticAdd(g);
   const o={mesh:g,item:item}; lootItems.push(o); return o;
 }
 function spawnGroundLoot(x,z){
@@ -1766,13 +1892,13 @@ function spawnChest(x,z){
   const glow=new THREE.Mesh(GEO.chestGlow,
     new THREE.MeshBasicMaterial({color:0xf2c14e,transparent:true,opacity:.13,depthWrite:false,side:THREE.DoubleSide}));
   glow.position.y=3.0; g.add(glow); g.userData.glow=glow;
-  g.position.set(x,0,z); world.add(g);
+  g.position.set(x,0,z); staticAdd(g);
   chests.push({mesh:g,lid:lid,x:x,z:z,y:0,open:false});
 }
 function spawnAmmoBox(x,z){
   const g=new THREE.Group();
   const b=new THREE.Mesh(BOX,M(0x4a6b3c)); b.scale.set(1.0,.6,.7); b.position.y=.3; g.add(b);
-  g.position.set(x,0,z); world.add(g);
+  g.position.set(x,0,z); staticAdd(g);
   ammoBoxes.push({mesh:g,x:x,z:z,open:false});
 }
 function openChest(c){
@@ -1850,13 +1976,13 @@ function spawnBots(n){
       pos:new THREE.Vector3(rnd(-HALF+40,HALF-40),rnd(195,270),rnd(-HALF+40,HALF-40)),
       vel:new THREE.Vector3(), onGround:false, yaw:rnd(0,6.28), pitch:0,
       hp:100, sh:0, alive:true, kills:0,
-      mats:{wood:ri(0,30),brick:0,metal:0}, matSel:"wood",
+      mats:{wood:ri(60,140),brick:ri(0,40),metal:0}, matSel:"wood",
       ammo:{light:30,medium:24,shells:10,heavy:4,rocket:0},
       slots:newInventory(), sel:0, build:false, piece:"wall",
       cool:0, reloading:0, aiming:false, building:false, swing:0, kick:0, emoteT:0,
       heldItem:null, burstLeft:0, spin:0, using:null, useT:0, useTotal:0,
       skill:skill, react:rnd(.12,.45)/Math.max(.5,DIFF), aggr:rnd(.3,1),
-      builder:rnd(.25,1), looter:rnd(.4,1),
+      builder:rnd(.55,1), looter:rnd(.55,1),
       state:"drop",
       land: Math.random()<0.55
         ? new THREE.Vector3(poi.x+rnd(-30,30),0,poi.z+rnd(-30,30))
@@ -1872,7 +1998,8 @@ function spawnBots(n){
       stormFlee:false, stormProgT:0, stormLastD:undefined,
       coverT:0, blockedHard:false,
       ignore:new Set(), harvestBad:new Set(), badClearT:rnd(20,40),
-      anchor:null, anchorT:0, forceT:0, forceDir:new THREE.Vector3(), idleMoveT:0
+      anchor:null, anchorT:0, forceT:0, forceDir:new THREE.Vector3(), idleMoveT:0,
+      pickT:0, grabT:0, lodAcc:0, lodSkip:false, targetDist:1e9
     };
     // Kein Startgewehr: jeder Bot geht zuerst auf Waffensuche (wie im echten Match)
     bots.push(b);
@@ -1957,7 +2084,17 @@ function depenetrate(e,r,h){
 const ray=new THREE.Raycaster();
 const projectiles=[];
 
-function entityList(){ const a=[]; for(const b of bots)if(b.alive)a.push(b); if(player.alive)a.push(player); return a; }
+/* Liste einmal pro Frame aufbauen statt hunderte Male pro Sekunde neu */
+const _ents=[]; let _entDirty=true;
+function entityList(){
+  if(_entDirty){
+    _ents.length=0;
+    for(let i=0;i<bots.length;i++)if(bots[i].alive)_ents.push(bots[i]);
+    if(player.alive)_ents.push(player);
+    _entDirty=false;
+  }
+  return _ents;
+}
 function hasLOS(a,b){
   const ox=a.x,oy=a.y+1.5,oz=a.z;
   let dx=b.x-ox, dy=(b.y+1.3)-oy, dz=b.z-oz;
@@ -2086,6 +2223,7 @@ function damage(e,amount,src,head){
   if(e.hp<=0){ e.hp=0; kill(e,src); }
 }
 function kill(e,src){
+  _entDirty=true;
   e.alive=false;
   const from=e.pos.clone();
   if(e===player){
@@ -2311,10 +2449,10 @@ function botBestSlot(b){
     if(s.inMag<=0&&b.ammo[s.def.ammo]<=0)continue;      // leer & keine Reserve -> nutzlos
     let sc=scoreWeapon(s);
     const def=s.def;
-    if(d<12) sc+= def.pellets?26:(def.rng<100?10:-10);
-    else if(d<32) sc+= def.pellets?-8:(def.auto?14:2);
-    else if(d<75) sc+= def.scope?10:(def.auto?8:0);
-    else sc+= def.scope?30:(def.rng>200?18:-14);
+    if(d<12) sc+= def.pellets?40:(def.rng<100?16:-26);   // auf Tuchfuehlung nie das Scharfschuetzengewehr
+    else if(d<32) sc+= def.pellets?-4:(def.auto?20:4)+(def.scope?-18:0);
+    else if(d<75) sc+= def.scope?12:(def.auto?10:0);
+    else sc+= def.scope?34:(def.rng>200?18:-20);
     if(s.inMag<=0)sc-=14;
     if(sc>bs){bs=sc;best=i;}
   }
@@ -2352,25 +2490,38 @@ function botFindHeal(b){
   }
   return best;
 }
+/* Zielwahl: Naehe schlaegt alles. Ein Gegner 5 m vor der Nase ist immer
+   wichtiger als einer 100 m weit weg — egal welche Waffe der Bot traegt. */
 function botSee(b,dt){
   b.scanT-=dt;
   if(b.scanT>0)return;
-  b.scanT=0.18+Math.random()*0.14;
-  let best=null,bd=1e9;
-  const gun=b.slots[b.sel]&&b.slots[b.sel].kind==="weapon"?b.slots[b.sel]:null;
-  const range=gun?clamp(gun.def.rng,60,150):55;
-  for(const t of entityList()){
-    if(t===b)continue;
-    const d=b.pos.distanceTo(t.pos);
+  b.scanT=0.15+Math.random()*0.10;
+  const gi=botGunSlot(b);
+  const gun=gi>0?b.slots[gi]:null;
+  const range=gun?clamp(gun.def.rng,70,170):60;
+  const fx0=-Math.sin(b.yaw), fz0=-Math.cos(b.yaw);
+  let best=null,bs=-1e9,bd=0;
+  const list=entityList();
+  for(let i=0;i<list.length;i++){
+    const t=list[i]; if(t===b||!t.alive)continue;
+    const dx=t.pos.x-b.pos.x, dy=t.pos.y-b.pos.y, dz=t.pos.z-b.pos.z;
+    const d=Math.sqrt(dx*dx+dy*dy+dz*dz);
     if(d>range)continue;
-    const to=new THREE.Vector3().subVectors(t.pos,b.pos).normalize();
-    const f=new THREE.Vector3(-Math.sin(b.yaw),0,-Math.cos(b.yaw));
-    if(to.dot(f)<-0.55&&d>14)continue;
-    if(d<bd&&hasLOS(b.pos,t.pos)){best=t;bd=d;}
+    // Nahbereich wird rundum wahrgenommen, weit entfernte nur im Sichtfeld
+    if(d>25 && (fx0*dx+fz0*dz)/d < -0.30)continue;
+    if(!hasLOS(b.pos,t.pos))continue;
+    let sc = 2000 - d*22;                 // Entfernung dominiert die Wertung
+    if(d<12) sc+=900;                     // direkt vor der Nase
+    else if(d<30) sc+=500;
+    else if(d<55) sc+=180;
+    if(t===b.target) sc+=70;              // kleine Hysterese gegen Zielflackern
+    if(t.isPlayer) sc+=30;
+    if(t.hp+t.sh<45) sc+=120;             // angeschlagene Gegner zuerst
+    if(sc>bs){bs=sc;best=t;bd=d;}
   }
   if(best){
     if(b.target!==best)b.reactT=b.react;
-    b.target=best; b.lastSeen=best.pos.clone(); b.seenT=4.5;
+    b.target=best; b.lastSeen=best.pos.clone(); b.seenT=4.5; b.targetDist=bd;
   } else if(b.seenT<=0) b.target=null;
 }
 function botAim(b,dt,tgt){
@@ -2428,7 +2579,7 @@ function botHarvest(b,dt){
   const c=b.harvest;
   const cx=(c.min.x+c.max.x)/2,cz=(c.min.z+c.max.z)/2;
   const d=Math.hypot(cx-b.pos.x,cz-b.pos.z);
-  b.sel=0;
+  b.sel=0; b.pickT=0.5;
   if(d>2.6){ b.moveDir=new THREE.Vector3(cx-b.pos.x,0,cz-b.pos.z).normalize(); b.speed=5.4;
     b.yaw=angLerp(b.yaw,Math.atan2(-b.moveDir.x,-b.moveDir.z),.14); return true; }
   b.moveDir=new THREE.Vector3();
@@ -2516,49 +2667,60 @@ function botTurtleStep(b,dt){
 function botBuildFightStep(b,dt,to){
   const S=b.buildUp;
   S.life+=dt;
-  if(S.life>14||!botPickMat(b,false)||S.fail>4||S.left<=0){
-    b.buildUp=null; b.buildCD=rnd(2,4.5); return;
+  if(S.life>20||S.fail>7||S.left<=0||!botPickMat(b,false)){
+    b.buildUp=null; b.buildCD=rnd(1.0,2.6); return;
   }
   const dir=new THREE.Vector3(Math.cos(S.ang),0,Math.sin(S.ang));
-  b.moveDir.copy(dir); b.speed=5.6;                 // die eigene Rampe hochlaufen
-  b.yaw=angLerp(b.yaw,Math.atan2(-to.x,-to.z),.12); // Blick bleibt beim Gegner
+  b.moveDir.copy(dir); b.speed=6.0;                 // die eigene Rampe hochlaufen
+  b.yaw=angLerp(b.yaw,Math.atan2(-to.x,-to.z),.14); // Blick bleibt beim Gegner
+  b.building=true;
 
-  if(S.phase==="ramp"){
-    if(b.cool>0)return;
-    const ok=botBuildPiece(b,"ramp",dir);
-    b.cool=.12;
-    if(ok){
-      if(b.onGround){ b.vel.y=9.6; b.jumpCD=.4; }
-      S.y0=b.pos.y; S.phase="climb"; S.climbT=0; S.fail=0;
-    } else {
-      S.fail++; S.ang+=Math.PI/2;                   // blockiert -> 90er und neu ansetzen
-    }
-  } else if(S.phase==="climb"){
+  // Steigen laeuft unabhaengig vom Bau-Cooldown weiter
+  if(S.phase==="climb"){
     S.climbT+=dt;
-    if(b.pos.y>=S.y0+G*0.8||Math.floor(b.pos.y/G+0.001)>Math.floor(S.y0/G+0.001)){                       // eine Etage geschafft
-      S.left--; S.levels++;
-      S.climbT=0;
-      if(S.levels%2===0){ S.ang+=Math.PI/2; S.phase="turn"; }   // 90er mit Boden als Auftritt
-      else S.phase="wall";
-    } else if(S.climbT>2.0){
-      if(b.onGround&&b.jumpCD<=0){ b.vel.y=9.4; b.jumpCD=.4; }
-      if(S.climbT>3.2){ S.fail++; S.phase="ramp"; S.climbT=0; }
+    if(b.pos.y>=S.y0+G*0.75||Math.floor(b.pos.y/G+0.001)>Math.floor(S.y0/G+0.001)){
+      S.left--; S.levels++; S.climbT=0; S.y0=b.pos.y;
+      if(S.levels%2===0)S.ang+=Math.PI/2;           // 90er
+      S.phase="floor";                              // jede Etage bekommt einen Boden
+    } else if(S.climbT>1.6){
+      if(b.onGround&&b.jumpCD<=0){ b.vel.y=9.6; b.jumpCD=.35; }
+      if(S.climbT>3.0){ S.fail++; S.phase="ramp"; S.climbT=0; }
     }
-  } else if(S.phase==="turn"){                      // 90er: Boden in die neue Richtung
-    if(b.cool>0)return;
-    const nd=new THREE.Vector3(Math.cos(S.ang),0,Math.sin(S.ang));
-    const c=cellOf(b.pos.x+nd.x*G*0.8,b.pos.y,b.pos.z+nd.z*G*0.8);
+    return;
+  }
+  if(b.cool>0)return;
+  const c=cellOf(b.pos.x,b.pos.y,b.pos.z);
+
+  if(S.phase==="floor"){
+    // Boden unter den Fuessen — genau das haben die Bots vorher nie gebaut
     const t=floorTargetAt(c.cx,c.cy,c.cz);
-    const ok=built.has(t.key)||placePiece(b,t);
-    if(!ok)S.ang-=Math.PI/2;              // kein Halt für den Boden -> Drehung zurücknehmen
-    b.building=true; b.cool=.12;
-    S.phase="ramp";
-  } else {                                          // Schutzwand Richtung Gegner
-    if(b.cool>0)return;
-    const ok=botBuildPiece(b,"wall",to);
-    b.cool=.12;
-    if(!ok)S.fail++;
-    S.phase="ramp";
+    if(!built.has(t.key))placePiece(b,t);
+    b.cool=.09; S.phase="wall";
+  } else if(S.phase==="wall"){
+    // Schutzwand Richtung Gegner, bei genug Material zusaetzlich eine seitlich
+    if(!botBuildPiece(b,"wall",to))S.fail++;
+    if(botMats(b)>=BUILD_COST*8){
+      const sv=new THREE.Vector3(-to.z,0,to.x);
+      botBuildPiece(b,"wall",sv);
+      if(botMats(b)>=BUILD_COST*12)botBuildPiece(b,"wall",sv.clone().multiplyScalar(-1));
+    }
+    b.cool=.09; S.phase="ramp";
+  } else {
+    const ok=botBuildPiece(b,"ramp",dir);
+    b.cool=.10;
+    if(ok){
+      if(b.onGround){ b.vel.y=9.8; b.jumpCD=.35; }
+      S.y0=b.pos.y; S.phase="climb"; S.climbT=0;
+    } else {
+      S.fail++; S.ang+=Math.PI/2; S.phase="floor";  // blockiert -> 90er und neu ansetzen
+    }
+  }
+
+  // Ganz oben ein Dach drueber, damit niemand von oben reinspringt
+  if(S.left<=1&&!S.roofed&&botMats(b)>=BUILD_COST*2){
+    const rt=roofTargetAt(c.cx,c.cy+1,c.cz);
+    if(!built.has(rt.key))placePiece(b,rt);
+    S.roofed=true;
   }
 }
 
@@ -2660,8 +2822,9 @@ function botFlee(b,dt){
   const to=new THREE.Vector3().subVectors(tgt.pos,b.pos); to.y=0;
   const d=to.length()||1; to.normalize();
   b.aiming=false;
-  b.sel=0;
+  if(!botArmed(b)){ b.sel=0; b.pickT=0.4; }
   if(d<3.2&&b.cool<=0){          // in die Enge getrieben: Spitzhacke
+    b.sel=0; b.pickT=0.5;
     harvestSwing(b,new THREE.Vector3(tgt.pos.x,tgt.pos.y+1.1,tgt.pos.z));
   }
   if(d<26&&botPickMat(b,false)&&b.buildCD<=0){
@@ -2732,7 +2895,8 @@ function botFight(b,dt){
   b.strafeT-=dt; if(b.strafeT<=0){ b.strafe*=-1; b.strafeT=rnd(.7,2.0); }
 
   const ideal = w.def.pellets?7:w.def.scope?55:w.def.rng<100?16:26;
-  const push=clamp((dist-ideal)/12,-1,1);
+  let push=clamp((dist-ideal)/12,-1,1);
+  if(dist>maxEngage)push=1;        // ausserhalb der eigenen Reichweite: ran an den Gegner
 
   if(b.retreat>0){
     b.moveDir.copy(to).multiplyScalar(-1).addScaledVector(side,.5).normalize();
@@ -2749,12 +2913,12 @@ function botFight(b,dt){
   /* ---- Baubattle ---- */
   if(b.buildUp){ botBuildFightStep(b,dt,to); }
   b.buildCD-=dt;
-  if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&los&&dist>7&&dist<70&&
-     b.builder>0.25&&botMats(b)>=BUILD_COST*6&&(b.hurtT>0||Math.random()<0.6)){
+  if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&los&&dist>5&&dist<95&&
+     botMats(b)>=BUILD_COST*5&&(b.hurtT>0||tgt.pos.y>b.pos.y+2||Math.random()<0.9)){
     // Duell: sofort hochbauen und Höhe erkämpfen
-    b.buildUp={ang:Math.atan2(to.z,to.x)+rnd(-.35,.35),phase:"ramp",left:ri(4,9),
-               levels:0,fail:0,life:0,climbT:0,y0:b.pos.y};
-    b.buildCD=rnd(3,6);
+    b.buildUp={ang:Math.atan2(to.z,to.x)+rnd(-.3,.3),phase:"floor",left:ri(6,14),
+               levels:0,fail:0,life:0,climbT:0,y0:b.pos.y,roofed:false};
+    b.buildCD=rnd(1.4,3.2);
   }
   if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&botPickMat(b,false)){
     const needCover = b.hurtT>0||b.reloading>0||w.inMag<=0||b.hp<55;
@@ -2778,10 +2942,15 @@ function botFight(b,dt){
   }
 
   // Material knapp? Nur farmen, wenn weit weg vom Gegner
-  if(botMats(b)<20&&dist>55){ botHarvest(b,dt); }
+  if(botMats(b)<40&&dist>60){ botHarvest(b,dt); }
 
-  // Schießen
-  if(los&&b.reactT<=0&&b.cool<=0&&b.reloading<=0&&dist<w.def.rng&&aimErr<0.12+(1-b.skill)*0.2){
+  // Schießen — aber nur auf Entfernungen, die zur Waffe passen.
+  // Mit Schrotflinte oder Sturmgewehr wird nicht mehr quer ueber die Karte gefeuert.
+  const longOK = w.def.scope || w.def.rng>190;
+  const maxEngage = w.def.pellets ? Math.min(w.def.rng,20)
+                  : longOK ? w.def.rng
+                  : Math.min(w.def.rng,62);
+  if(los&&b.reactT<=0&&b.cool<=0&&b.reloading<=0&&dist<maxEngage&&aimErr<0.12+(1-b.skill)*0.2){
     const ap=botAimPoint(b,tgt.pos,dist);
     if(shootWeapon(b,ap)){
       if(w.def.burst){ b.burstLeft=w.def.burst-1; }
@@ -2791,7 +2960,7 @@ function botFight(b,dt){
       if(b.fireT>rnd(0.9,1.6)){ b.fireT=0; b.cool+=rnd(.45,1.1); }   // Magazin-Pause
     }
   }
-  if(b.burstLeft>0&&b.cool<=0){
+  if(b.burstLeft>0&&b.cool<=0&&dist<maxEngage){
     const ap=botAimPoint(b,tgt.pos,dist);
     if(shootWeapon(b,ap))b.burstLeft--;
     if(b.burstLeft<=0)b.cool+=0.35;
@@ -2863,7 +3032,7 @@ function botIdle(b,dt,stormDist){
 
   /* --- Material farmen (erst wenn bewaffnet) --- */
   const mats=botMats(b);
-  const wantMats=mats<340*b.builder&&stormDist<-14;
+  const wantMats=mats<(240+320*b.builder)&&stormDist<-14;
   if(wantMats){
     if(botHarvest(b,dt))return;
     b.farmScanT-=dt;
@@ -2979,7 +3148,7 @@ function botIdle(b,dt,stormDist){
 }
 function botWants(b,it){
   if(it.kind==="weapon"){
-    if(!b.armed)return true;
+    if(!botArmed(b))return true;
     let worst=-1,ws=1e9,empty=-1;
     for(let i=1;i<b.slots.length;i++){
       if(!b.slots[i]){empty=i;break;}
@@ -3010,12 +3179,25 @@ function botCollect(b,g){
     let empty=-1,worst=-1,ws=1e9;
     for(let i=1;i<b.slots.length;i++){
       if(!b.slots[i]){empty=i;break;}
-      if(b.slots[i].kind==="weapon"){const s=scoreWeapon(b.slots[i]);if(s<ws){ws=s;worst=i;}}
+      if(b.slots[i].kind==="weapon"){const sc=scoreWeapon(b.slots[i]);if(sc<ws){ws=sc;worst=i;}}
     }
-    const idx=empty>0?empty:worst;
-    if(idx>0){ if(b.slots[idx])spawnFloor(b.slots[idx],b.pos.x+rnd(-1,1),b.pos.z+rnd(-1,1),b.pos.y);
-      b.slots[idx]=l.item; b.sel=idx; b.armed=true; }
-  } else pickupItem(b,l.item);
+    let idx=empty>0?empty:worst;
+    /* Frueher blieb idx hier bei -1, wenn alle Plaetze mit Heilung oder
+       Granaten belegt waren — die Waffe wurde geloescht statt genommen.
+       Jetzt macht der Bot notfalls Platz. */
+    if(idx<0){
+      for(let i=b.slots.length-1;i>=1;i--){
+        const sl=b.slots[i];
+        if(sl&&sl.kind!=="weapon"&&sl.kind!=="heal"){ idx=i; break; }
+      }
+    }
+    if(idx<0&&!botArmed(b)){
+      for(let i=b.slots.length-1;i>=1;i--) if(b.slots[i]){ idx=i; break; }
+    }
+    if(idx<0){ b.ignore.add(l); return; }        // wirklich kein Platz: liegen lassen
+    if(b.slots[idx])spawnFloor(b.slots[idx],b.pos.x+rnd(-1,1),b.pos.z+rnd(-1,1),b.pos.y);
+    b.slots[idx]=l.item; b.sel=idx; b.armed=true; b.pickT=0;
+  } else if(!pickupItem(b,l.item)) return;
   removeLoot(l);
 }
 
@@ -3056,7 +3238,7 @@ function botBreakThrough(b,dirVec){
   // schlägt sich frei: Baum, Wand, eigenes Bauteil — egal was im Weg ist
   const dir=(dirVec&&dirVec.lengthSq()>0.001)?dirVec.clone().normalize()
            :(b.moveDir.lengthSq()>0.001?b.moveDir.clone():new THREE.Vector3(-Math.sin(b.yaw),0,-Math.cos(b.yaw)));
-  b.sel=0;
+  b.sel=0; b.pickT=0.6;
   b.yaw=angLerp(b.yaw,Math.atan2(-dir.x,-dir.z),.5);
   if(b.cool<=0){
     harvestSwing(b,new THREE.Vector3(b.pos.x+dir.x*2.2,b.pos.y+1.1,b.pos.z+dir.z*2.2));
@@ -3065,6 +3247,17 @@ function botBreakThrough(b,dirVec){
 }
 function finishBotFrame(b,dt){
   const before=b.pos.clone();
+  if(b.pickT>0)b.pickT-=dt;
+  // Loot direkt unter den Fuessen einsammeln — sonst laufen Bots an Waffen vorbei
+  b.grabT=(b.grabT||0)-dt;
+  if(b.grabT<=0){
+    b.grabT=0.22;
+    for(let i=lootItems.length-1;i>=0;i--){
+      const l=lootItems[i], q=l.mesh.position;
+      const dx=q.x-b.pos.x, dz=q.z-b.pos.z;
+      if(dx*dx+dz*dz<5.3&&Math.abs(q.y-b.pos.y)<3.2&&botWants(b,l.item)){ botCollect(b,{loot:l}); break; }
+    }
+  }
   // Blacklists regelmäßig leeren, damit nichts dauerhaft verloren geht
   b.badClearT-=dt;
   if(b.badClearT<=0){ b.badClearT=rnd(25,45); b.harvestBad.clear(); b.ignore.clear(); }
@@ -3118,6 +3311,16 @@ function finishBotFrame(b,dt){
     b.anchor.copy(b.pos); b.anchorT=0;
   }
   b.stormFlee=false;
+  /* Waffe gehoert in die Hand. Die Spitzhacke nur solange, wie wirklich
+     gehackt wird — danach wird sofort zurueck auf die beste Waffe gewechselt. */
+  if(!b.turtle&&!b.harvest&&!b.using&&b.pickT<=0){
+    const cur=b.slots[b.sel];
+    if(!cur||cur.kind!=="weapon"){
+      const g=botBestSlot(b);
+      if(g>0){ b.sel=g; b.spin=0; }
+    }
+  }
+  if(!heldWeapon(b))b.aiming=false;      // mit der Spitzhacke wird nicht gezielt
   b.heldItem=b.slots[b.sel];
   setRigWeapon(b.rig,b.heldItem);
   animRig(b,dt);
@@ -3746,6 +3949,7 @@ function startMatch(){
   if(world.parent)scene.remove(world);
   built.clear(); projectiles.length=0; fx.length=0;
   DIFF=parseFloat(el("optDiff").value);
+  perfSetMode(el("optQual")?el("optQual").value:"auto");
   SENS.v=0.0022*(el("optSens").value/100);
   buildWorld(); initStorm(); resetPlayer();
   player.deathPlace=0;
@@ -3783,11 +3987,29 @@ let botTick=0;
 function tick(){
   requestAnimationFrame(tick);
   const dt=Math.min(clock.getDelta(),.05);
+  perfAdapt(dt);
+  _entDirty=true;
   if(running&&!paused){
     if(phase==="drop")updateDrop(dt);
     else if(phase==="play")updatePlay(dt);
     else if(phase==="spectate")updateSpectate(dt);
-    for(const b of bots) if(b.alive) updateBot(b,dt);
+    /* Bot-LOD: weit entfernte Bots denken seltener und werden nicht animiert.
+       Das ist der groesste Gewinn bei vielen Gegnern. */
+    const cpos=camera?camera.position:null;
+    const near2=PERF.botFar*PERF.botFar, hide2=PERF.botHide*PERF.botHide;
+    for(let i=0;i<bots.length;i++){
+      const b=bots[i]; if(!b.alive)continue;
+      let d2=0;
+      if(cpos){ const dx=b.pos.x-cpos.x, dz=b.pos.z-cpos.z, dy=b.pos.y-cpos.y; d2=dx*dx+dy*dy+dz*dz; }
+      const far=d2>near2;
+      b.lodSkip = d2>hide2*0.36;
+      if(b.rig)b.rig.root.visible = d2<hide2;
+      if(!far){ updateBot(b,dt); b.lodAcc=0; }
+      else {
+        b.lodAcc=(b.lodAcc||0)+dt;
+        if(b.lodAcc>=PERF.lodStep){ updateBot(b,Math.min(b.lodAcc,0.2)); b.lodAcc=0; }
+      }
+    }
     updateStorm(dt);
     updateProjectiles(dt);
     if(collapseT>0){collapseT-=dt;if(collapseT<=0)runCollapse();}
@@ -3799,6 +4021,7 @@ function tick(){
   shake=Math.max(0,shake-dt*4.5);
   if(running&&!paused&&player.alive)updateAmbient();
   updateFx(dt);
+  updateChunks(dt);
   // Loot nur in der Nähe animieren, Lichtsäulen in der Ferne ausblenden
   lootAnimT-=dt;
   const doBeams=lootAnimT<=0; if(doBeams)lootAnimT=0.5;
@@ -3808,7 +4031,7 @@ function tick(){
     const l=lootItems[i], m=l.mesh;
     const dx=cp?m.position.x-cp.x:0, dz=cp?m.position.z-cp.z:0;
     const near=dx*dx+dz*dz<90*90;
-    if(doBeams){ m.visible=dx*dx+dz*dz<220*220; if(m.userData.beam)m.userData.beam.visible=near; }
+    if(doBeams){ m.visible=dx*dx+dz*dz<PERF.renderDist*PERF.renderDist; if(m.userData.beam)m.userData.beam.visible=near; }
     if(!near||!m.visible)continue;
     m.rotation.y+=dt*1.4; m.children[0].position.y=bob;
   }
@@ -3822,6 +4045,7 @@ function tick(){
    ====================================================================== */
 function wireMenu(){
   el("optBots").addEventListener("input",e=>el("optBotsV").textContent=e.target.value);
+  if(el("optQual"))el("optQual").addEventListener("change",e=>perfSetMode(e.target.value));
   el("btnStart").addEventListener("click",()=>{audioInit();resumeAudio();startMatch();});
   el("btnAgain").addEventListener("click",startMatch);
   el("btnResume").addEventListener("click",()=>setPaused(false));
