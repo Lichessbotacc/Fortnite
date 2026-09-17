@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>Sturmfeld — Kapitel 1 / Saison 4</title>
+<title>Fortnite — Kapitel 1 / Saison 4</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;900&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -313,7 +313,7 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v;
 const pick=a=>a[Math.floor(Math.random()*a.length)];
 const lerp=(a,b,t)=>a+(b-a)*t;
 const angLerp=(a,b,t)=>{let d=((b-a+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;return a+d*t;};
-const MAP=460, HALF=MAP/2, G=4;
+const MAP=680, HALF=MAP/2, G=4;
 const PR=0.42, PH=1.8, EYE=1.62;
 
 let scene,camera,renderer,clock;
@@ -329,7 +329,7 @@ const LOWFX=TOUCH;
 function initGfx(){
   scene=new THREE.Scene();
   scene.background=new THREE.Color(0xa8d2ec);
-  scene.fog=new THREE.FogExp2(0xa8d2ec,0.0034);
+  scene.fog=new THREE.FogExp2(0xa8d2ec,0.0021);
   camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.08,1400);
   renderer=new THREE.WebGLRenderer({antialias:!LOWFX,powerPreference:"high-performance"});
   renderer.setPixelRatio(Math.min(devicePixelRatio,LOWFX?1.25:2));
@@ -450,12 +450,13 @@ function buildWorld(){
    .forEach(a=>addBox(box(a[0],a[1],a[2],a[3],a[4],a[5],wallM)));
 
   const names=["Wailing Woods","Tilted Towers","Retail Row","Dusty Divot","Salty Springs",
-               "Lonely Lodge","Greasy Grove","Risky Reels","Lazy Links","Pleasant Park"];
+               "Lonely Lodge","Greasy Grove","Risky Reels","Lazy Links","Pleasant Park",
+               "Fatal Fields","Junk Junction","Snobby Shores"];
   const spots=[];
-  for(let i=0;i<10;i++){
+  for(let i=0;i<names.length;i++){
     let p,ok,tries=0;
-    do{ p=new THREE.Vector2(rnd(-HALF+58,HALF-58),rnd(-HALF+58,HALF-58));
-        ok=spots.every(s=>s.distanceTo(p)>92); tries++; }while(!ok&&tries<80);
+    do{ p=new THREE.Vector2(rnd(-HALF+70,HALF-70),rnd(-HALF+70,HALF-70));
+        ok=spots.every(s=>s.distanceTo(p)>130); tries++; }while(!ok&&tries<100);
     spots.push(p); POIS.push({name:names[i],x:p.x,z:p.y});
   }
   POIS.forEach((p,i)=>makePOI(p.x,p.z,i));
@@ -463,20 +464,20 @@ function buildWorld(){
   // Dusty Divot Krater um POI 3
   crater(POIS[3].x,POIS[3].z);
 
-  const deco=LOWFX?190:340;
+  const deco=Math.round((LOWFX?190:340)*2.18);
   for(let i=0;i<deco;i++){
     const x=rnd(-HALF+6,HALF-6),z=rnd(-HALF+6,HALF-6);
     if(spots.some(s=>Math.hypot(s.x-x,s.y-z)<28))continue;
     const r=Math.random();
     if(r<0.66)tree(x,z); else if(r<0.9)rock(x,z); else bush(x,z);
   }
-  for(let i=0;i<20;i++){ // Vorratskisten in der Wildnis
+  for(let i=0;i<44;i++){ // Vorratskisten in der Wildnis
     const x=rnd(-HALF+30,HALF-30),z=rnd(-HALF+30,HALF-30);
     if(spots.some(s=>Math.hypot(s.x-x,s.y-z)<26))continue;
     if(Math.random()<.5)spawnChest(x,z); else spawnAmmoBox(x,z);
   }
-  for(let i=0;i<42;i++){
-    const s=pick(spots), a=rnd(0,6.3), d=rnd(4,28);
+  for(let i=0;i<92;i++){
+    const s=pick(spots), a=rnd(0,6.3), d=rnd(4,32);
     spawnGroundLoot(s.x+Math.cos(a)*d, s.y+Math.sin(a)*d);
   }
 }
@@ -943,7 +944,7 @@ function buildTargetFor(e){
     t.pos=new THREE.Vector3(c.cx*G+G/2, c.cy*G, c.cz*G+G/2);
     if(piece==="floor"){ t.rotY=0; }
     else if(piece==="ramp"){
-      t.rotY = Math.abs(fh.x)>Math.abs(fh.z) ? (fh.x>0?-Math.PI/2:Math.PI/2) : (fh.z>0?0:Math.PI);
+      t.rotY = Math.abs(fh.x)>Math.abs(fh.z) ? (fh.x>0?Math.PI/2:-Math.PI/2) : (fh.z>0?0:Math.PI);
       t.dir  = Math.abs(fh.x)>Math.abs(fh.z) ? (fh.x>0?"x+":"x-") : (fh.z>0?"z+":"z-");
     } else { t.rotY=0; }
   }
@@ -1379,8 +1380,8 @@ function updateAmbient(){
    STURM
    ====================================================================== */
 const storm={cx:0,cz:0,r:MAP*0.8,tx:0,tz:0,tr:0,dps:1,phase:0,t:0,state:"wait",mesh:null};
-const PHASES=[{wait:38,move:38,f:.62,dps:1},{wait:30,move:32,f:.58,dps:2},{wait:26,move:28,f:.55,dps:4},
-              {wait:22,move:24,f:.5,dps:6},{wait:18,move:20,f:.45,dps:8},{wait:16,move:18,f:.4,dps:10},
+const PHASES=[{wait:46,move:46,f:.62,dps:1},{wait:36,move:38,f:.58,dps:2},{wait:30,move:32,f:.55,dps:4},
+              {wait:24,move:26,f:.5,dps:6},{wait:20,move:22,f:.45,dps:8},{wait:17,move:19,f:.4,dps:10},
               {wait:14,move:16,f:.35,dps:12},{wait:12,move:14,f:.2,dps:14}];
 function initStorm(){
   storm.cx=rnd(-70,70); storm.cz=rnd(-70,70); storm.r=MAP*0.8;
@@ -1546,7 +1547,7 @@ function spawnBots(n){
       goal:new THREE.Vector3(), goalT:0, lootGoal:null, lootT:rnd(0,1.2),
       buildCD:rnd(1,4), rampT:0, harvest:null, harvestT:0, stuck:0, jumpCD:0,
       panic:0, retreat:0, chatT:rnd(20,90),
-      turtle:null, turtleCD:rnd(2,7)
+      turtle:null, turtleCD:rnd(2,7), farmGoal:null, farmScanT:rnd(0,1.5)
     };
     // Startwaffe je nach Skill
     if(Math.random()<.35) b.slots[1]=makeWeapon(pick(WEAPONS.filter(w=>w.cls<=2)),0);
@@ -2062,8 +2063,8 @@ function botBuildPiece(b,type,dirVec){
 function botHarvest(b,dt){
   if(!b.harvest||b.harvest.hp<=0||colliders.indexOf(b.harvest)<0){
     b.harvest=null;
-    const near=nearbyR(b.pos.x,b.pos.z,14);
-    let bd=14;
+    const near=nearbyR(b.pos.x,b.pos.z,20);
+    let bd=20;
     for(const c of near){
       if(!c.res)continue;
       const cx=(c.min.x+c.max.x)/2,cz=(c.min.z+c.max.z)/2;
@@ -2316,11 +2317,41 @@ function botIdle(b,dt,stormDist){
   if(b.slots[b.sel]&&b.slots[b.sel].kind!=="weapon"){
     const idx=botBestSlot(b); if(idx>0)b.sel=idx;
   }
-  // Material farmen
+  // Material farmen — erst in Reichweite, sonst gezielt zum nächsten Baum/Stein laufen
   const mats=b.mats.wood+b.mats.brick+b.mats.metal;
-  if(mats<200*b.builder&&stormDist<-25&&Math.random()<0.9){
+  const wantMats=mats<340*b.builder&&stormDist<-14;
+  if(wantMats){
     if(botHarvest(b,dt))return;
-  }
+    b.farmScanT-=dt;
+    if(b.farmGoal){
+      const d=Math.hypot(b.farmGoal.x-b.pos.x,b.farmGoal.z-b.pos.z);
+      if(d<16){ b.farmGoal=null; }                    // nah genug — botHarvest übernimmt ab hier
+      else {
+        const to=new THREE.Vector3(b.farmGoal.x-b.pos.x,0,b.farmGoal.z-b.pos.z).normalize();
+        b.moveDir=to; b.speed=5.6;
+        b.yaw=angLerp(b.yaw,Math.atan2(-to.x,-to.z),.11);
+        b.pitch=lerp(b.pitch,0,.1);
+        return;
+      }
+    } else if(b.farmScanT<=0){
+      b.farmScanT=rnd(3,6);
+      const near=nearbyR(b.pos.x,b.pos.z,55);
+      let bd=55,best=null;
+      for(const c of near){
+        if(!c.res)continue;
+        const cx=(c.min.x+c.max.x)/2,cz=(c.min.z+c.max.z)/2;
+        if(outside(cx,cz,10))continue;
+        const d=Math.hypot(cx-b.pos.x,cz-b.pos.z);
+        if(d<bd){bd=d;best={x:cx,z:cz};}
+      }
+      if(best){ b.farmGoal=best;
+        const to=new THREE.Vector3(best.x-b.pos.x,0,best.z-b.pos.z).normalize();
+        b.moveDir=to; b.speed=5.6;
+        b.yaw=angLerp(b.yaw,Math.atan2(-to.x,-to.z),.11);
+        return;
+      }
+    }
+  } else b.farmGoal=null;
   // Looten
   b.lootT-=dt;
   if(b.lootT<=0){
@@ -2826,7 +2857,7 @@ function initTouch(){
 
   const st=el("stick");
   addEventListener("pointerdown",e=>{
-    if(editMode||!running||paused||e.target.closest(".tb")||e.target.closest("button"))return;
+    if(editMode||!running||paused||e.target.closest(".tb")||e.target.closest("button")||e.target.closest(".slot")||e.target.closest("#bottom"))return;
     e.preventDefault();
     if(e.clientX<innerWidth*0.45&&stickId===null){
       stickId=e.pointerId; stickOx=e.clientX; stickOy=e.clientY;
