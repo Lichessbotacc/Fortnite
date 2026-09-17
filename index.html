@@ -326,7 +326,7 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v;
 const pick=a=>a[Math.floor(Math.random()*a.length)];
 const lerp=(a,b,t)=>a+(b-a)*t;
 const angLerp=(a,b,t)=>{let d=((b-a+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;return a+d*t;};
-const MAP=900, HALF=MAP/2, G=4;
+const MAP=900, HALF=MAP/2, G=5.4;
 const PR=0.42, PH=1.8, EYE=1.62;
 
 let scene,camera,renderer,clock;
@@ -575,10 +575,10 @@ function nearbyR(x,z,r){
   return NEAR;
 }
 function nearby(x,z){ return nearbyR(x,z,1.2); }
-function addBox(mesh,res,hp,structure,noRay,noClip){
+function addBox(mesh,res,hp,structure,noRay,noClip,hitBox){
   if(mesh.parent)mesh.parent.updateWorldMatrix(true,false);
   mesh.updateWorldMatrix(true,true);
-  const b=new THREE.Box3().setFromObject(mesh);
+  const b=hitBox||new THREE.Box3().setFromObject(mesh);
   const c={min:b.min,max:b.max,mesh:mesh,hp:hp||0,maxhp:hp||0,res:res||null,structure:!!structure,noRay:!!noRay,noClip:!!noClip};
   colliders.push(c); if(!noRay)hitMeshes.push(mesh); mesh.userData.col=c;
   gridAdd(c);
@@ -762,7 +762,11 @@ function crater(cx,cz){
     const s=rnd(1.4,3.0);
     const m=new THREE.Mesh(GEO.rock,M(0x6a7a86)); m.scale.setScalar(s);
     m.position.set(cx+Math.cos(a)*d,s*.5,cz+Math.sin(a)*d);
-    m.rotation.set(rnd(0,3),rnd(0,3),rnd(0,3)); staticAdd(m); addBox(m,"brick",140);
+    m.rotation.set(rnd(0,3),rnd(0,3),rnd(0,3)); staticAdd(m);
+    const hb=new THREE.Box3(
+      new THREE.Vector3(m.position.x-s,m.position.y-s,m.position.z-s),
+      new THREE.Vector3(m.position.x+s,m.position.y+s,m.position.z+s));
+    addBox(m,"brick",140,false,false,false,hb);
   }
 }
 function tree(x,z){
@@ -787,7 +791,12 @@ function rock(x,z){
   const m=new THREE.Mesh(GEO.rock,MAT.rock);
   m.scale.setScalar(s);
   m.position.set(x,s*0.55,z); m.rotation.set(rnd(0,3),rnd(0,3),rnd(0,3)); staticAdd(m);
-  addBox(m,"brick",140);
+  // Eigene, rotationsunabhängige Hitbox statt der aufgeblähten AABB eines frei
+  // gedrehten Meshes — sonst trifft man "Luft" an den Ecken des Felsens.
+  const hb=new THREE.Box3(
+    new THREE.Vector3(x-s,m.position.y-s,z-s),
+    new THREE.Vector3(x+s,m.position.y+s,z+s));
+  addBox(m,"brick",140,false,false,false,hb);
 }
 /* Kapitel 1 / Saison 4 — alle benannten Orte, Lage wie auf der Originalkarte
    (nx/nz = normalisierte Koordinaten, -1 = West/Nord, +1 = Ost/Süd) */
@@ -1304,7 +1313,7 @@ const MATHP={wood:150,brick:280,metal:460};
 const MATFULL={wood:150,brick:280,metal:460};
 const built=new Map();     // key -> {grp,cols,type,cx,cy,cz,axis,mat,hp}
 const BUILD_COST=10;
-const BUILD_LIMIT=420;     // Obergrenze fuer gleichzeitig stehende Bauteile
+const BUILD_LIMIT=560;     // Obergrenze fuer gleichzeitig stehende Bauteile
 
 function cellOf(x,y,z){ return {cx:Math.floor(x/G),cy:Math.floor(y/G+0.001),cz:Math.floor(z/G)}; }
 function keyFor(type,cx,cy,cz,axis){
@@ -1332,7 +1341,11 @@ function buildTargetFor(e){
   } else {
     // Zelle vor dem Spieler
     const fx=e.pos.x+fh.x*G*0.8, fz=e.pos.z+fh.z*G*0.8;
-    const c=cellOf(fx,e.pos.y,fz);
+    // Bei Rampen großzügig nach oben abrunden: steht man (fast) oben auf der
+    // aktuellen Treppenstufe, soll die nächste Rampe daran anschließen statt
+    // wegen Physik-Jitter eine Etage zu tief (= "verbindet nicht") anzusetzen.
+    const yBias = piece==="ramp" ? G*0.22 : 0.001;
+    const c=cellOf(fx,e.pos.y+yBias,fz);
     t.cx=c.cx;t.cy=c.cy;t.cz=c.cz;
     t.pos=new THREE.Vector3(c.cx*G+G/2, c.cy*G, c.cz*G+G/2);
     if(piece==="floor"){ t.rotY=0; }
@@ -1435,7 +1448,12 @@ function placePiece(e,t,silent){
   } else if(t.type==="ramp"){
     const vis=new THREE.Mesh(BOX,mat); vis.scale.set(G-.06,.30,G*1.44);
     vis.rotation.x=-Math.PI/4; vis.position.y=G/2; grp.add(vis);
-    cols.push(addBox(vis,null,hp,true,false,true));   // sichtbar+beschießbar, aber ohne Kollisionsblock
+    // Eigene Hitbox statt der aufgeblähten AABB der 45°-gedrehten Rampe — die
+    // war rund 20% zu groß und ragte in den leeren Raum über/unter der Treppe.
+    const rampHB=new THREE.Box3(
+      new THREE.Vector3(t.pos.x-(G-.06)/2, t.pos.y, t.pos.z-G/2),
+      new THREE.Vector3(t.pos.x+(G-.06)/2, t.pos.y+G, t.pos.z+G/2));
+    cols.push(addBox(vis,null,hp,true,false,true,rampHB));   // sichtbar+beschießbar, aber ohne Kollisionsblock
     const NST=8;
     for(let s=0;s<NST;s++){
       const st=new THREE.Mesh(BOX,new THREE.MeshBasicMaterial({visible:false}));
@@ -2716,7 +2734,7 @@ let buildFighters=0, buildFightT=0;
 function botBuildFightStep(b,dt,to){
   const S=b.buildUp;
   S.life+=dt;
-  if(S.life>16||S.fail>6||S.left<=0||!botPickMat(b,false)||built.size>BUILD_LIMIT*0.95){
+  if(S.life>26||S.fail>14||S.left<=0||!botPickMat(b,false)||built.size>BUILD_LIMIT*0.97){
     b.buildUp=null; b.buildCD=rnd(1.0,2.6); return;
   }
   const dir=new THREE.Vector3(Math.cos(S.ang),0,Math.sin(S.ang));
@@ -2968,12 +2986,12 @@ function botFight(b,dt){
   if(b.buildUp){ botBuildFightStep(b,dt,to); }
   b.buildCD-=dt;
   if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&los&&dist>5&&dist<80&&
-     botMats(b)>=BUILD_COST*5&&built.size<BUILD_LIMIT*0.8&&
-     (b.hurtT>0||tgt.pos.y>b.pos.y+2||Math.random()<0.7)){
+     botMats(b)>=BUILD_COST*4&&built.size<BUILD_LIMIT*0.9&&
+     (b.hurtT>0||tgt.pos.y>b.pos.y+1.5||Math.random()<0.85)){
     // Duell: sofort hochbauen und Höhe erkämpfen
-    b.buildUp={ang:Math.atan2(to.z,to.x)+rnd(-.3,.3),phase:"floor",left:ri(5,10),
+    b.buildUp={ang:Math.atan2(to.z,to.x)+rnd(-.3,.3),phase:"floor",left:ri(8,16),
                levels:0,fail:0,life:0,climbT:0,y0:b.pos.y,roofed:false};
-    b.buildCD=rnd(2.2,4.5);
+    b.buildCD=rnd(1.4,2.8);
   }
   if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&botPickMat(b,false)){
     const needCover = b.hurtT>0||b.reloading>0||w.inMag<=0||b.hp<55;
