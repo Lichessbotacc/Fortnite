@@ -15,7 +15,11 @@
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
-  font-family:'Archivo',system-ui,sans-serif;-webkit-user-select:none;user-select:none;touch-action:none;overscroll-behavior:none}
+  font-family:'Archivo',system-ui,sans-serif;-webkit-user-select:none;user-select:none;touch-action:none;
+  overscroll-behavior:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;
+  -webkit-text-size-adjust:none;text-size-adjust:none}
+*{touch-action:none}
+input[type=range],select{touch-action:manipulation}
 canvas{display:block;touch-action:none}
 #hud,#overlay{position:fixed;inset:0;pointer-events:none}
 .hidden{display:none !important}
@@ -252,6 +256,22 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
 (function(){
 "use strict";
 if(typeof THREE==="undefined"){document.body.innerHTML="<p style='padding:40px;font:18px sans-serif;color:#fff'>3D-Bibliothek konnte nicht geladen werden. Verbindung prüfen und Seite neu laden.</p>";return;}
+
+/* ============ Zoom/Gesten vollständig unterbinden ============ */
+["gesturestart","gesturechange","gestureend"].forEach(ev=>
+  document.addEventListener(ev,e=>e.preventDefault()));
+document.addEventListener("dblclick",e=>e.preventDefault());
+addEventListener("wheel",e=>{ if(e.ctrlKey)e.preventDefault(); },{passive:false});
+document.addEventListener("touchmove",e=>{ if(e.touches&&e.touches.length>1)e.preventDefault(); },{passive:false});
+let __lastTap=0;
+document.addEventListener("touchend",e=>{
+  const now=Date.now();
+  if(now-__lastTap<=350)e.preventDefault();
+  __lastTap=now;
+},{passive:false});
+addEventListener("keydown",e=>{
+  if((e.ctrlKey||e.metaKey)&&["+","-","=","0"].includes(e.key))e.preventDefault();
+});
 
 /* ============ Grundlagen ============ */
 const rnd=(a,b)=>a+Math.random()*(b-a);
@@ -1540,30 +1560,52 @@ function updatePlay(dt){
 }
 
 /* ============ Start ============ */
-initGfx();
-initTouch();
-if(!TOUCH) el("btnEditControls").style.display="none";
-el("optBots").addEventListener("input",e=>el("optBotsV").textContent=e.target.value);
-el("btnStart").addEventListener("click",startMatch);
-el("btnAgain").addEventListener("click",startMatch);
-el("btnResume").addEventListener("click",()=>setPaused(false));
-el("btnEditControls").addEventListener("click",enterEditMode);
-el("btnEditDone").addEventListener("click",exitEditMode);
-el("btnEditReset").addEventListener("click",resetLayout);
-el("specNext").addEventListener("click",()=>cycleSpec(1));
-el("specPrev").addEventListener("click",()=>cycleSpec(-1));
-el("specEnd").addEventListener("click",()=>endMatch(false));
-addEventListener("keydown",e=>{
-  if(phase!=="spectate")return;
-  if(e.code==="KeyD"||e.code==="Space"||e.code==="ArrowRight")cycleSpec(1);
-  if(e.code==="KeyA"||e.code==="ArrowLeft")cycleSpec(-1);
-});
-addEventListener("click",e=>{
-  if(TOUCH)return;
-  if(phase==="spectate"){ if(!e.target.closest("button"))cycleSpec(1); return; }
-  if(running&&!paused&&phase!=="menu"&&phase!=="end"&&document.pointerLockElement!==renderer.domElement)lock();
-});
-tick();
+// Menü-Knöpfe werden ZUERST verdrahtet, unabhängig davon, ob die 3D-Initialisierung
+// klappt - so bleibt die Startseite auch bei einem Grafikfehler bedienbar.
+function wireMenu(){
+  el("optBots").addEventListener("input",e=>el("optBotsV").textContent=e.target.value);
+  el("btnStart").addEventListener("click",startMatch);
+  el("btnAgain").addEventListener("click",startMatch);
+  el("btnResume").addEventListener("click",()=>setPaused(false));
+  el("btnEditControls").addEventListener("click",enterEditMode);
+  el("btnEditDone").addEventListener("click",exitEditMode);
+  el("btnEditReset").addEventListener("click",resetLayout);
+  el("specNext").addEventListener("click",()=>cycleSpec(1));
+  el("specPrev").addEventListener("click",()=>cycleSpec(-1));
+  el("specEnd").addEventListener("click",()=>endMatch(false));
+  if(!TOUCH) el("btnEditControls").style.display="none";
+  addEventListener("keydown",e=>{
+    if(phase!=="spectate")return;
+    if(e.code==="KeyD"||e.code==="Space"||e.code==="ArrowRight")cycleSpec(1);
+    if(e.code==="KeyA"||e.code==="ArrowLeft")cycleSpec(-1);
+  });
+  addEventListener("click",e=>{
+    if(TOUCH)return;
+    if(phase==="spectate"){ if(!e.target.closest("button"))cycleSpec(1); return; }
+    if(running&&!paused&&phase!=="menu"&&phase!=="end"&&renderer&&document.pointerLockElement!==renderer.domElement)lock();
+  });
+}
+function showFatalError(err){
+  console.error(err);
+  const d=document.createElement("div");
+  d.style.cssText="position:fixed;inset:0;z-index:99999;background:#0d1218;color:#fff;"+
+    "font-family:system-ui,sans-serif;padding:32px;overflow:auto;line-height:1.5";
+  d.innerHTML="<h2 style='margin-top:0'>Sturmfeld konnte nicht starten</h2>"+
+    "<p>Dieses Gerät/Browser meldet einen Fehler bei der 3D-Grafik. Bitte Safari/Browser aktualisieren, "+
+    "den Low-Power-Modus ausschalten oder es in Chrome/Safari (nicht in einer eingebetteten App-Ansicht) erneut versuchen.</p>"+
+    "<pre style='white-space:pre-wrap;background:#161f28;padding:14px;border-radius:6px;font-size:13px;color:#ffb4a8'>"+
+    (err&&err.message?err.message:String(err))+"</pre>"+
+    "<button onclick='location.reload()' style='margin-top:14px;padding:12px 22px;font-size:16px;background:#6fd0ff;border:0;border-radius:4px;cursor:pointer'>Neu laden</button>";
+  document.body.appendChild(d);
+}
+wireMenu();
+try{
+  initGfx();
+  initTouch();
+  tick();
+}catch(err){
+  showFatalError(err);
+}
 })();
 </script>
 </body>
