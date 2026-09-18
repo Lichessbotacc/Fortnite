@@ -1152,6 +1152,20 @@ function makePOI(cx,cz,seed,type){
     }
   }
 }
+// Baut eine Etagen-Decke MIT rechteckiger Aussparung (fuer Treppenaufgaenge),
+// statt eines durchgehenden Blocks — sonst fuehrt jede Treppe gegen die Decke.
+function floorWithHole(cx,fy,cz,w,d,mat,holeCX,holeCZ,holeW,holeD){
+  const x0=cx-w/2, x1=cx+w/2, z0=cz-d/2, z1=cz+d/2;
+  const hx0=clamp(holeCX-holeW/2,x0,x1), hx1=clamp(holeCX+holeW/2,x0,x1);
+  const hz0=clamp(holeCZ-holeD/2,z0,z1), hz1=clamp(holeCZ+holeD/2,z0,z1);
+  if(hz0>z0) addBox(box(w,0.4,hz0-z0,cx,fy,(z0+hz0)/2,mat),"wood",220);
+  if(hz1<z1) addBox(box(w,0.4,z1-hz1,cx,fy,(hz1+z1)/2,mat),"wood",220);
+  const midZlen=hz1-hz0;
+  if(midZlen>0.05){
+    if(hx0>x0) addBox(box(hx0-x0,0.4,midZlen,(x0+hx0)/2,fy,(hz0+hz1)/2,mat),"wood",220);
+    if(hx1<x1) addBox(box(x1-hx1,0.4,midZlen,(hx1+x1)/2,fy,(hz0+hz1)/2,mat),"wood",220);
+  }
+}
 function house(x,z,w,d,floors,style){
   const m=style===0?MAT.wall:style===1?MAT.wall2:MAT.wall3;
   const H=3.4*floors, t=0.45;
@@ -1178,7 +1192,11 @@ function house(x,z,w,d,floors,style){
       }
     }
   });
-  for(let f=1;f<floors;f++) addBox(box(w,0.4,d,x,3.4*f,z,MAT.plank),"wood",220);
+  // Treppenloch: die Etagen-Decke bekommt eine echte Öffnung genau dort, wo
+  // die Treppe oben ankommt — vorher war die Decke ein durchgehender Block,
+  // die Treppe fuehrte also buchstaeblich gegen die Decke ("ins Nichts").
+  const stairCX=x-w/2+1.5, stairTopZ=z-d/2+1.2+8*0.62;
+  for(let f=1;f<floors;f++) floorWithHole(x,3.4*f,z,w,d,MAT.plank,stairCX,stairTopZ,2.8,2.0);
   addBox(box(w+1.2,0.6,d+1.2,x,H,z,style===2?MAT.roof:MAT.roof2),"brick",260);
   // Treppen nach oben
   for(let f=0;f<floors-1;f++){
@@ -2298,7 +2316,7 @@ function spawnBots(n){
     const rig=makeRig(outfit,skin); world.add(rig.root);
     const poi=POIS[i%POIS.length];
     const skill=clamp(rnd(.22,.95)*DIFF*DIFF,.15,1.25);   // DIFF quadratisch, damit "Locker" wirklich locker ist
-    const sensi=clamp(rnd(.5,1.0)*rnd(.85,1.6),.4,1.5);   // persoenliche "Maus-Sensitivitaet", s.u.
+    const sensi=clamp(rnd(.32,.68)*rnd(.7,1.15),.24,.95);   // persoenliche "Maus-Sensitivitaet", s.u. — insgesamt spuerbar traeger
     const b={
       name:names[i%names.length]+(i>=names.length?" "+(1+Math.floor(i/names.length)):""),
       rig:rig, col:outfit.a,
@@ -3163,7 +3181,7 @@ function updateBot(b,dt){
   // STURM hat immer Vorrang — auch vor Heilen und Bauen
   if(inStorm){
     b.turtle=null; b.buildUp=null; b.using=null; b.useT=0; b.lootGoal=null; b.farmGoal=null;
-    b.harvest=null; b.commitT=0; b.emoteT=0;
+    b.harvest=null; b.commitT=0; b.emoteT=0; b.freshLoot=null;
     const to=new THREE.Vector3(storm.cx-b.pos.x,0,storm.cz-b.pos.z);
     if(to.lengthSq()<0.01)to.set(1,0,0);
     to.normalize();
@@ -3331,6 +3349,12 @@ function botFight(b,dt){
       if(h&&h.col&&h.col.buildRec)wallHit=h;
     }
   }
+  // Ganz nah an der Box: zusaetzlich mit der Spitzhacke draufhauen statt nur
+  // zu schiessen — bricht die Wand deutlich schneller auf, genau wie ein
+  // Spieler, der eine Box "einnimmt".
+  if(wallHit&&dist<3.6&&b.cool<=0){
+    harvestSwing(b,new THREE.Vector3(wallHit.x,wallHit.y,wallHit.z));
+  }
 
   const ideal = w.def.pellets?7:w.def.scope?55:w.def.rng<100?16:26;
   let push=clamp((dist-ideal)/12,-1,1);
@@ -3386,9 +3410,12 @@ function botFight(b,dt){
       if(acted){ b.coverT=1.6; b.buildCD=rnd(1.2,2.2); }
     }
     if(!acted&&wantsHigh){
-      acted=botBuildPiece(b,"ramp",to);            // Höhe nur nachholen, nicht grundlos vorpreschen
-      if(acted&&b.onGround&&b.jumpCD<=0){ b.vel.y=9.4; b.jumpCD=.45; }
-      if(acted)b.buildCD=rnd(.7,1.4);
+      // Statt einer einzelnen Rampe, auf der die Bots vorher oft einfach stehen
+      // blieben statt hochzulaufen, startet hier dieselbe robuste Klettersequenz
+      // wie beim vollen Baukampf (Rampe -> draufspringen -> Etage -> wieder Rampe).
+      b.buildUp={ang:Math.atan2(to.z,to.x),phase:"ramp",left:ri(2,5),
+                 levels:0,fail:0,life:0,climbT:0,y0:b.pos.y,roofed:true};
+      acted=true; b.buildCD=rnd(.9,1.6);
     }
     if(!acted)b.buildCD=rnd(.9,1.9);    // laengere Denkpause statt sofort wieder pruefen
   }
@@ -3425,6 +3452,27 @@ function botFight(b,dt){
 function botIdle(b,dt,stormDist){
   b.aiming=false;
   const armed=b.armed;
+  /* PRIORITÄT 0: frischer Loot von einem gerade getöteten Gegner. Vorher wurde
+     freshLoot beim Kill zwar gesetzt, aber nirgends ausgewertet — Bots liefen
+     also direkt weiter zum naechsten Gegner, ohne die Leiche zu pluendern. */
+  if(b.freshLoot&&b.freshLootT>0){
+    b.freshLootT-=dt;
+    const d=Math.hypot(b.freshLoot.x-b.pos.x,b.freshLoot.z-b.pos.z);
+    if(d>2.4){
+      const to=new THREE.Vector3(b.freshLoot.x-b.pos.x,0,b.freshLoot.z-b.pos.z).normalize();
+      b.moveDir=to; b.speed=7.6;
+      b.yaw=bYaw(b,Math.atan2(-to.x,-to.z),.14);
+      b.pitch=lerp(b.pitch,0,.1);
+      return;
+    }
+    // am Ziel angekommen: alles einsammeln, was von der Leiche in der Naehe liegt
+    for(const l of lootItems.slice()){
+      if(b.ignore.has(l))continue;
+      const p=l.mesh.position;
+      if(Math.hypot(p.x-b.pos.x,p.z-b.pos.z)<3.4)botCollect(b,{loot:l});
+    }
+    b.freshLoot=null; b.freshLootT=0;
+  } else if(b.freshLoot){ b.freshLoot=null; }
   /* Nach dem Watchdog: eine Weile stur ein weit entferntes Ziel anlaufen,
      damit sich der Bot nicht sofort wieder im selben Konflikt verhakt. */
   if(b.commitT>0){
@@ -3734,7 +3782,7 @@ function finishBotFrame(b,dt){
       const l=lootItems[(b.grabI+k)%n]; if(!l)continue;
       const q=l.mesh.position;
       const dx=q.x-b.pos.x, dz=q.z-b.pos.z;
-      if(dx*dx+dz*dz<5.3&&Math.abs(q.y-b.pos.y)<3.2&&botWants(b,l.item)){ botCollect(b,{loot:l}); break; }
+      if(dx*dx+dz*dz<9.5&&Math.abs(q.y-b.pos.y)<3.2&&botWants(b,l.item)){ botCollect(b,{loot:l}); break; }
     }
   }
   // Blacklists regelmäßig leeren, damit nichts dauerhaft verloren geht
@@ -3765,7 +3813,7 @@ function finishBotFrame(b,dt){
   if(moved<b.speed*dt*0.35&&b.speed>1){ b.stuck+=dt; } else b.stuck=Math.max(0,b.stuck-dt*2);
 
   if(b.stuck>0.35&&b.onGround&&b.jumpCD<=0){ b.vel.y=9.2; b.jumpCD=.5; }     // 1. kleine Kante? springen
-  if(b.stuck>0.9){                                                            // 2. freischlagen
+  if(b.stuck>0.7){                                                            // 2. freischlagen
     botBreakThrough(b);
     b.avoidSide=-(b.avoidSide||1);
   }
@@ -3781,7 +3829,7 @@ function finishBotFrame(b,dt){
   /* ---- Watchdog: kein Bot bleibt stehen (außer beim Heilen/in der Heilbox) ---- */
   if(!b.anchor)b.anchor=b.pos.clone();
   b.anchorT+=dt;
-  if(b.anchorT>2.5){
+  if(b.anchorT>1.7){
     const disp=Math.hypot(b.pos.x-b.anchor.x,b.pos.z-b.anchor.z);
     if(disp<2.0&&!b.using&&!b.turtle&&!b.stormFlee){
       if(b.harvest){ b.harvestBad.add(b.harvest); b.harvest=null; }
