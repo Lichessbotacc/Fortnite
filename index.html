@@ -312,6 +312,7 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
           <option value="auto" selected>Automatisch</option><option value="low">Niedrig (schwacher PC)</option><option value="med">Mittel</option><option value="high">Hoch</option>
         </select>
       </label>
+      <label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="optKillHeal" checked style="width:auto"> Heilung pro Kill (+Schild/HP für Bots)</label>
     </div>
     <button id="btnStart">Match starten</button>
     <button id="btnSpectate" class="ghost" style="background:transparent;color:var(--ink);border:1px solid var(--line);margin-left:12px">Nur zuschauen</button>
@@ -378,6 +379,7 @@ const colliders=[], hitMeshes=[];
 let world=new THREE.Group();
 const SENS={v:0.0022};
 let DIFF=1;
+let KILL_HEAL=true;   // Bots bekommen nach einem Kill +Schild/HP — in den Einstellungen abschaltbar
 const el=id=>document.getElementById(id);
 const TOUCH=('ontouchstart' in window)||(navigator.maxTouchPoints||0)>0;
 
@@ -2323,7 +2325,7 @@ function spawnBots(n){
       pos:new THREE.Vector3(rnd(-HALF+40,HALF-40),rnd(195,270),rnd(-HALF+40,HALF-40)),
       vel:new THREE.Vector3(), onGround:false, yaw:rnd(0,6.28), pitch:0,
       hp:100, sh:0, alive:true, kills:0,
-      mats:{wood:ri(60,140),brick:ri(0,40),metal:0}, matSel:"wood",
+      mats:{wood:0,brick:0,metal:0}, matSel:"wood",
       ammo:{light:30,medium:24,shells:10,heavy:4,rocket:0},
       slots:newInventory(), sel:0, build:false, piece:"wall",
       cool:0, reloading:0, aiming:false, building:false, swing:0, kick:0, emoteT:0,
@@ -2594,7 +2596,8 @@ function kill(e,src){
   const killer=src===player?"Du":(src&&src.name?src.name:"Der Sturm");
   feed(killer+" → "+e.name);
   if(src===player){ player.kills++; sndKill(); }
-  else if(src&&src.kills!==undefined){ src.kills++; src.sh=Math.min(100,src.sh+30); src.hp=Math.min(100,src.hp+15);
+  else if(src&&src.kills!==undefined){ src.kills++;
+    if(KILL_HEAL){ src.sh=Math.min(100,src.sh+30); src.hp=Math.min(100,src.hp+15); }
     // Nach einem Kill zieht es den Bot erstmal zur Leiche, um den Loot
     // einzusammeln — sonst rennen Bots mit 1-2 Waffen die ganze Runde weiter,
     // weil sofort der naechste sichtbare Gegner Vorrang bekommt.
@@ -4584,6 +4587,7 @@ function startMatch(spectate){
   if(world.parent)scene.remove(world);
   built.clear(); projectiles.length=0; fx.length=0;
   DIFF=parseFloat(el("optDiff").value);
+  KILL_HEAL=el("optKillHeal")?el("optKillHeal").checked:true;
   perfSetMode(el("optQual")?el("optQual").value:"auto");
   SENS.v=0.0022*(el("optSens").value/100);
   buildWorld(); initStorm(); resetPlayer();
@@ -4730,14 +4734,16 @@ function wireMenu(){
     if(prefs.diff)el("optDiff").value=prefs.diff;
     if(prefs.sens)el("optSens").value=prefs.sens;
     if(prefs.qual&&el("optQual"))el("optQual").value=prefs.qual;
+    if(prefs.killHeal!==undefined&&el("optKillHeal"))el("optKillHeal").checked=prefs.killHeal;
   }catch(e){}
   function savePrefs(){
     try{ localStorage.setItem("sf_prefs",JSON.stringify({
       bots:el("optBots").value, diff:el("optDiff").value,
-      sens:el("optSens").value, qual:el("optQual")?el("optQual").value:"auto"
+      sens:el("optSens").value, qual:el("optQual")?el("optQual").value:"auto",
+      killHeal:el("optKillHeal")?el("optKillHeal").checked:true
     })); }catch(e){}
   }
-  ["optBots","optDiff","optSens","optQual"].forEach(id=>{
+  ["optBots","optDiff","optSens","optQual","optKillHeal"].forEach(id=>{
     const n=el(id); if(n)n.addEventListener("change",savePrefs);
   });
   el("optBots").addEventListener("input",e=>el("optBotsV").textContent=e.target.value);
