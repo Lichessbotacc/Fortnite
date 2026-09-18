@@ -36,6 +36,24 @@ canvas{display:block;touch-action:none}
 #hitmark b:nth-child(2){top:13px}
 #hitmark.on{animation:hm .25s ease-out}
 @keyframes hm{from{opacity:1;transform:translate(-50%,-50%) rotate(45deg) scale(.6)}to{opacity:0;transform:translate(-50%,-50%) rotate(45deg) scale(1.3)}}
+
+/* Scope-Overlay: schwarze Blende mit rundem Ausschnitt, wie ein echtes Zielfernrohr */
+#scopeOv{position:fixed;inset:0;pointer-events:none;display:none;z-index:6;
+  background:radial-gradient(circle at 50% 50%, transparent 0, transparent calc(var(--scopeR,240px) - 2px),
+    #000 calc(var(--scopeR,240px) - 1px));
+}
+#scopeOv.on{display:block}
+.scopeCircle{position:absolute;left:50%;top:50%;width:calc(var(--scopeR,240px)*2);height:calc(var(--scopeR,240px)*2);
+  transform:translate(-50%,-50%);border-radius:50%;box-shadow:0 0 0 3px rgba(0,0,0,.85), inset 0 0 40px rgba(0,0,0,.55);}
+.scopeCross{position:absolute;left:50%;top:50%;width:2px;height:2px;background:#0a0a0a;
+  transform:translate(-50%,-50%);box-shadow:0 0 2px rgba(0,0,0,.8)}
+.scopeMil{position:absolute;background:#0a0a0a;left:50%;top:50%}
+.scopeMil.h1,.scopeMil.h2{width:34%;height:1.5px;top:calc(50% - .75px)}
+.scopeMil.h1{transform:translateX(-100%) translateX(-14px)}
+.scopeMil.h2{transform:translateX(14px)}
+.scopeMil.v1,.scopeMil.v2{height:34%;width:1.5px;left:calc(50% - .75px)}
+.scopeMil.v1{transform:translateY(-100%) translateY(-14px)}
+.scopeMil.v2{transform:translateY(14px)}
 #dmgNums{position:fixed;inset:0;overflow:hidden}
 .dnum{position:absolute;font-family:'Barlow Condensed';font-weight:700;font-size:26px;
   text-shadow:0 2px 6px #000;animation:dn 1s ease-out forwards;color:#fff}
@@ -221,6 +239,13 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
 
 <div id="hud" class="hidden">
   <div id="cross"><b class="v t"></b><b class="v b2"></b><b class="h l"></b><b class="h r"></b><b class="dot"></b></div>
+  <div id="scopeOv">
+    <div class="scopeCircle">
+      <div class="scopeCross"></div>
+      <div class="scopeMil h1"></div><div class="scopeMil h2"></div>
+      <div class="scopeMil v1"></div><div class="scopeMil v2"></div>
+    </div>
+  </div>
   <div id="hitmark"><b></b><b></b></div>
   <div id="dmgNums"></div>
   <div id="top">
@@ -370,7 +395,7 @@ const angLerp=(a,b,t)=>{let d=((b-a+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-
 // Sensitivitaet (b.sensi) — verhindert ruckartiges Snappen und sorgt dafuer,
 // dass sich langsame und schnelle Bots spuerbar unterschiedlich anfuehlen.
 function bYaw(b,target,rate){ return angLerp(b.yaw,target,clamp(rate*(b.sensi||1),0,.9)); }
-const MAP=900, HALF=MAP/2, G=5.4;
+const MAP=900, HALF=MAP/2, G=3.8;   // Baugröße spürbar verkleinert, naeher an Fortnites Proportionen
 const PR=0.42, PH=1.8, EYE=1.62;
 
 let scene,camera,renderer,clock,sunLight;
@@ -1221,25 +1246,25 @@ function rarityRoll(bias){
 }
 // mdl: Modellbauplan | cls: Klasse für Bot-Bewertung
 const WEAPONS=[
- {id:"pistol",  name:"Pistole",              dmg:24, rpm:400, mag:16, ammo:"light",  spread:.014,auto:false,rng:110,rl:1.4, mdl:"pistol", cls:1},
- {id:"supppistol",name:"Schallgedämpfte Pistole",dmg:26,rpm:400,mag:16,ammo:"light",spread:.012,auto:false,rng:115,rl:1.4, mdl:"pistol", cls:1, silent:true},
- {id:"revolver",name:"Revolver",             dmg:54, rpm:110, mag:6,  ammo:"medium", spread:.016,auto:false,rng:140,rl:2.2, mdl:"revolver",cls:2},
- {id:"smg",     name:"Taktische Maschinenpistole",         dmg:16, rpm:800, mag:30, ammo:"light",  spread:.040,auto:true, rng:70, rl:2.1, mdl:"smg",    cls:2},
- {id:"ar",      name:"Sturmgewehr",          dmg:33, rpm:330, mag:30, ammo:"medium", spread:.019,auto:true, rng:170,rl:2.3, mdl:"scar",   cls:4},
- {id:"burst",   name:"Burst-Sturmgewehr",    dmg:31, rpm:420, mag:30, ammo:"medium", spread:.016,auto:true, rng:180,rl:2.4, mdl:"burst",  cls:4, burst:3},
- {id:"suppar",  name:"Schallgedämpftes Sturmgewehr",  dmg:30, rpm:400, mag:30, ammo:"medium", spread:.021,auto:true, rng:150,rl:2.3, mdl:"suppar", cls:4, silent:true},
- {id:"pump",    name:"Pump-Schrotflinte",    dmg:11, pellets:10,rpm:70,mag:5, ammo:"shells",spread:.062,auto:false,rng:40,rl:3.4, mdl:"pump",   cls:5},
- {id:"tac",     name:"Taktische Schrotflinte",dmg:8, pellets:10,rpm:140,mag:8,ammo:"shells",spread:.075,auto:false,rng:34,rl:3.0, mdl:"tac",    cls:4},
- {id:"bolt",    name:"Scharfschützengewehr", dmg:105,rpm:35,  mag:1,  ammo:"heavy",  spread:.002,auto:false,rng:420,rl:2.8, mdl:"bolt",   cls:5, scope:true},
- {id:"hunting", name:"Jagdgewehr",           dmg:86, rpm:48,  mag:1,  ammo:"heavy",  spread:.006,auto:false,rng:300,rl:1.9, mdl:"hunting",cls:4},
+ {id:"pistol",  name:"Pistole",              dmg:24, rpm:405, mag:16, ammo:"light",  spread:.014,auto:false,rng:110,rl:1.4, mdl:"pistol", cls:1},
+ {id:"supppistol",name:"Schallgedämpfte Pistole",dmg:23,rpm:405,mag:12,ammo:"light",spread:.012,auto:false,rng:115,rl:1.4, mdl:"pistol", cls:1, silent:true},
+ {id:"revolver",name:"Revolver",             dmg:34, rpm:300, mag:6,  ammo:"medium", spread:.016,auto:false,rng:140,rl:2.2, mdl:"revolver",cls:2},
+ {id:"smg",     name:"Taktische Maschinenpistole",         dmg:17, rpm:600, mag:30, ammo:"light",  spread:.040,auto:true, rng:70, rl:2.1, mdl:"smg",    cls:2},
+ {id:"ar",      name:"Sturmgewehr",          dmg:30, rpm:330, mag:30, ammo:"medium", spread:.019,auto:true, rng:170,rl:2.3, mdl:"scar",   cls:4},
+ {id:"burst",   name:"Burst-Sturmgewehr",    dmg:27, rpm:240, mag:30, ammo:"medium", spread:.016,auto:true, rng:180,rl:2.4, mdl:"burst",  cls:4, burst:3},
+ {id:"suppar",  name:"Schallgedämpftes Sturmgewehr",  dmg:27, rpm:330, mag:30, ammo:"medium", spread:.021,auto:true, rng:150,rl:2.3, mdl:"suppar", cls:4, silent:true},
+ {id:"pump",    name:"Pump-Schrotflinte",    dmg:9, pellets:10,rpm:42,mag:5, ammo:"shells",spread:.062,auto:false,rng:40,rl:3.4, mdl:"pump",   cls:5},
+ {id:"tac",     name:"Taktische Schrotflinte",dmg:9, pellets:10,rpm:111,mag:8,ammo:"shells",spread:.075,auto:false,rng:34,rl:3.0, mdl:"tac",    cls:4},
+ {id:"bolt",    name:"Scharfschützengewehr", dmg:105,rpm:20,  mag:1,  ammo:"heavy",  spread:.002,auto:false,rng:420,rl:2.8, mdl:"bolt",   cls:5, scope:true, proj:"bullet"},
+ {id:"hunting", name:"Jagdgewehr",           dmg:86, rpm:48,  mag:1,  ammo:"heavy",  spread:.006,auto:false,rng:300,rl:1.9, mdl:"hunting",cls:4, proj:"bullet"},
  {id:"rocket",  name:"Raketenwerfer",        dmg:110,rpm:34,  mag:1,  ammo:"rocket", spread:.004,auto:false,rng:400,rl:3.2, mdl:"rocket", cls:5, proj:"rocket"},
- {id:"grenadeL",name:"Granatwerfer",         dmg:95, rpm:60,  mag:6,  ammo:"rocket", spread:.010,auto:false,rng:300,rl:3.4, mdl:"gl",     cls:4, proj:"grenade"},
- {id:"minigun", name:"Minigun",              dmg:17, rpm:700, mag:200,ammo:"light",  spread:.050,auto:true, rng:120,rl:4.4, mdl:"minigun",cls:4, spin:.7},
- {id:"scopedar",name:"Sturmgewehr mit Zielfernrohr",    dmg:29, rpm:330, mag:20, ammo:"medium", spread:.011,auto:true, rng:210,rl:2.3, mdl:"scopedar",cls:4, scope:true},
- {id:"lmg",     name:"Leichtes Maschinengewehr",           dmg:26, rpm:500, mag:100,ammo:"medium", spread:.038,auto:true, rng:150,rl:5.0, mdl:"lmg",     cls:4},
- {id:"handcannon",name:"Handkanone",          dmg:75, rpm:66,  mag:7,  ammo:"heavy",  spread:.012,auto:false,rng:180,rl:2.1, mdl:"revolver",cls:4},
+ {id:"grenadeL",name:"Granatwerfer",         dmg:100,rpm:60,  mag:6,  ammo:"rocket", spread:.010,auto:false,rng:300,rl:3.4, mdl:"gl",     cls:4, proj:"grenade"},
+ {id:"minigun", name:"Minigun",              dmg:19, rpm:720, mag:200,ammo:"light",  spread:.050,auto:true, rng:120,rl:4.4, mdl:"minigun",cls:4, spin:.7},
+ {id:"scopedar",name:"Sturmgewehr mit Zielfernrohr",    dmg:23, rpm:330, mag:20, ammo:"medium", spread:.011,auto:true, rng:210,rl:2.3, mdl:"scopedar",cls:4, scope:true},
+ {id:"lmg",     name:"Leichtes Maschinengewehr",           dmg:25, rpm:500, mag:100,ammo:"medium", spread:.038,auto:true, rng:150,rl:5.0, mdl:"lmg",     cls:4},
+ {id:"handcannon",name:"Handkanone",          dmg:75, rpm:42,  mag:7,  ammo:"heavy",  spread:.012,auto:false,rng:180,rl:2.1, mdl:"revolver",cls:4},
  {id:"semisniper",name:"Halbautomatisches Scharfschützengewehr",
-                                               dmg:63, rpm:75,  mag:10, ammo:"heavy",  spread:.005,auto:false,rng:340,rl:2.9, mdl:"bolt",   cls:4, scope:true}
+                                               dmg:63, rpm:75,  mag:10, ammo:"heavy",  spread:.005,auto:false,rng:340,rl:2.9, mdl:"bolt",   cls:4, scope:true, proj:"bullet"}
 ];
 const CONSUMABLES=[
  {id:"bandage", kind:"heal", name:"Bandagen",       heal:15, cap:75,  time:2.6, stack:15, tgt:"hp"},
@@ -2528,12 +2553,17 @@ function explode(pos,dmg,radius,src){
 }
 function spawnProjectile(origin,dir,kind,dmg,src){
   const m=new THREE.Group();
-  const b=new THREE.Mesh(BOX,kind==="rocket"?M(0xd0d5da):M(0x3f6b30));
-  b.scale.set(.18,.18,kind==="rocket"?.7:.22); m.add(b);
+  const b=new THREE.Mesh(BOX,kind==="rocket"?M(0xd0d5da):kind==="bullet"?M(0xd9c27a):M(0x3f6b30));
+  b.scale.set(.18,.18,kind==="rocket"?.7:kind==="bullet"?.42:.22); m.add(b);
   if(kind==="rocket"){const f=new THREE.Mesh(BOX,M(0xd63b3b));f.scale.set(.06,.3,.2);f.position.z=.3;m.add(f);}
   m.position.copy(origin); world.add(m);
-  projectiles.push({mesh:m,pos:origin.clone(),vel:dir.clone().multiplyScalar(kind==="rocket"?55:32),
-    kind:kind,dmg:dmg,src:src,t:kind==="rocket"?6:3.2,grav:kind==="rocket"?0:16});
+  // "bullet" = echtes Geschoss fuer Scharfschützen-/Jagdgewehr: fliegt wirklich
+  // durchs Bild und sinkt ueber die Distanz leicht ab (Fortnites Kapitel-1-
+  // Ballistik), statt wie bei den restlichen Waffen instantan zu treffen.
+  const speed=kind==="rocket"?55:kind==="bullet"?320:32;
+  const grav=kind==="rocket"?0:kind==="bullet"?3:16;
+  projectiles.push({mesh:m,pos:origin.clone(),vel:dir.clone().multiplyScalar(speed),
+    kind:kind,dmg:dmg,src:src,t:kind==="rocket"?6:kind==="bullet"?2.2:3.2,grav:grav});
 }
 function updateProjectiles(dt){
   for(let i=projectiles.length-1;i>=0;i--){
@@ -2542,19 +2572,43 @@ function updateProjectiles(dt){
     const step=p.vel.clone().multiplyScalar(dt);
     const len=step.length();
     const sd=step.clone().normalize();
-    let boom=false, bp=null;
+    let boom=false, bp=null, bcol=null, bn=null, hitEnt=null, headshot=false;
     const ph=rayHit(p.pos.x,p.pos.y,p.pos.z,sd.x,sd.y,sd.z,len+0.3);
-    if(ph){boom=true;bp=new THREE.Vector3(ph.x,ph.y,ph.z);}
-    for(const t of entityList()){
-      if(t===p.src)continue;
-      const c=new THREE.Vector3(t.pos.x,t.pos.y+1,t.pos.z);
-      if(c.distanceTo(p.pos)<1.4){boom=true;bp=c.clone();break;}
+    if(ph){boom=true;bp=new THREE.Vector3(ph.x,ph.y,ph.z);bcol=ph.col;bn=new THREE.Vector3(ph.nx,ph.ny,ph.nz);}
+    if(p.kind==="bullet"){
+      // Geschoss: praezise Treffer-Erkennung wie bei Hitscan-Waffen (Kopf/Koerper/Beine)
+      let bestD=boom?p.pos.distanceTo(bp):len+0.3;
+      const parts=[{o:1.78,r:.30,m:2.0},{o:1.05,r:.48,m:1.0},{o:.5,r:.36,m:.9}];
+      for(const t of entityList()){
+        if(t===p.src)continue;
+        for(const pt of parts){
+          const c=new THREE.Vector3(t.pos.x,t.pos.y+pt.o,t.pos.z);
+          const v=c.clone().sub(p.pos); const proj=v.dot(sd);
+          if(proj<=0||proj>bestD)continue;
+          const perp=v.clone().sub(sd.clone().multiplyScalar(proj)).length();
+          if(perp<pt.r){ bestD=proj; hitEnt={e:t,mult:pt.m}; headshot=pt.m>1.5; boom=true;
+            bp=p.pos.clone().addScaledVector(sd,proj); break; }
+        }
+      }
+    } else {
+      for(const t of entityList()){
+        if(t===p.src)continue;
+        const c=new THREE.Vector3(t.pos.x,t.pos.y+1,t.pos.z);
+        if(c.distanceTo(p.pos)<1.4){boom=true;bp=c.clone();break;}
+      }
     }
     p.pos.add(step); p.mesh.position.copy(p.pos);
     p.mesh.lookAt(p.pos.clone().add(p.vel));
     if(p.pos.y<0.2){boom=true;bp=p.pos.clone();}
     if(boom||p.t<=0){
-      explode(bp||p.pos,p.dmg,p.kind==="rocket"?9:7.5,p.src);
+      if(p.kind==="bullet"){
+        // Kein Explosionsradius — trifft wie eine echte Kugel nur ihr Ziel.
+        if(hitEnt){ tracer(p.src&&muzzleWorld?p.pos:p.pos,bp); bloodHit(bp);
+          damage(hitEnt.e,p.dmg*hitEnt.mult,p.src,headshot); }
+        else if(bp){ hitStructure(bcol,p.dmg,bp,bn); }
+      } else {
+        explode(bp||p.pos,p.dmg,p.kind==="rocket"?9:7.5,p.src);
+      }
       if(p.mesh.parent)p.mesh.parent.remove(p.mesh);
       projectiles.splice(i,1);
     }
@@ -2686,20 +2740,24 @@ function harvestSwing(e,aimPt){
         const key=c.res==="wood"?"wood":c.res==="brick"?"brick":"metal";
         const got=ri(12,20);
         e.mats[key]=Math.min(999,e.mats[key]+got);
-        c.hp-=42;
+        c.hp-=50;                                    // exakter Fortnite-Wert: 50 Umgebungs-Schaden/Hieb
         impact(hitP,null); puff(hitP,key);
         if(e===player){ hitMark(false); sndHarvest(key); }
         if(c.hp<=0){ if(c.extra&&c.extra.parent)c.extra.parent.remove(c.extra); removeCollider(c);
           e.mats[key]=Math.min(999,e.mats[key]+ri(10,20)); }
-      } else if(c.buildRec){ damageBuild(c.buildRec,70); impact(hitP,null); }
+      } else if(c.buildRec){ damageBuild(c.buildRec,75); impact(hitP,null); }   // 75 = exakter Bauteil-Schaden
       else { c.hp-=50; impact(hitP,null); }
     }
   }
+  // Trefferbereich gegen Spieler grosszuegiger: vorher fuehrte der enge Kegel
+  // (60°) + kurze Reichweite (3.0) dazu, dass viele Spitzhacken-Schwuenge
+  // "durchgingen", ohne zu treffen — das fuehlte sich wie viel zu wenig
+  // Schaden an, obwohl der Wert an sich (20, echter Fortnite-Wert) stimmte.
   for(const t of entityList()){
     if(t===e)continue;
-    if(t.pos.distanceTo(e.pos)<3.0){
+    if(t.pos.distanceTo(e.pos)<3.6){
       const to=new THREE.Vector3().subVectors(t.pos,e.pos).normalize();
-      if(to.dot(dir)>0.5){ damage(t,20,e,false); break; }
+      if(to.dot(dir)>0.28){ damage(t,20,e,false); break; }
     }
   }
 }
@@ -4060,9 +4118,20 @@ function updatePlay(dt){
   const w=heldWeapon(player);
   player.aiming=mouseRight&&!player.build&&!!w;
   player.building=false;
-  const targetFov=player.aiming?(w&&w.def.scope?38:62):75;
+  const scoped=player.aiming&&w&&w.def.scope;
+  const targetFov=player.aiming?(scoped?24:62):75;
   camera.fov=lerp(camera.fov,targetFov,1-Math.pow(.002,dt));
   camera.updateProjectionMatrix();
+  // Echtes Scope: runde Blende übers Bild, Fadenkreuz verschwindet dahinter —
+  // wie beim Scharfschützengewehr & Zielfernrohr-Sturmgewehr in Fortnite.
+  if(scoped){
+    el("scopeOv").classList.add("on");
+    el("scopeOv").style.setProperty("--scopeR", (w.def.id==="bolt"||w.def.id==="semisniper"?"200px":"260px"));
+    el("cross").style.visibility="hidden";
+  } else {
+    el("scopeOv").classList.remove("on");
+    el("cross").style.visibility="visible";
+  }
 
   const f=new THREE.Vector3(-Math.sin(player.yaw),0,-Math.cos(player.yaw));
   const r=new THREE.Vector3(-f.z,0,f.x);
@@ -4518,6 +4587,7 @@ const spec={i:0,target:null};function enterSpectate(){
   el("specHud").classList.remove("hidden");
   el("bottom").style.display="none"; el("ammo").style.display="none";
   el("mats").style.display="none"; el("cross").style.display="none";
+  el("scopeOv").classList.remove("on");
   el("buildBar").classList.add("hidden"); el("castBar").classList.add("hidden");
   el("prompt").classList.add("hidden"); el("stormFx").style.opacity=0; el("lowhp").style.opacity=0;
   if(preview)preview.visible=false;
