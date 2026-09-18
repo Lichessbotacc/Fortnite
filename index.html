@@ -62,10 +62,13 @@ canvas{display:block;touch-action:none}
 @media (max-width:820px){#bottom{left:8px;bottom:8px;width:auto}
   #slots{gap:4px}.slot{width:58px;height:46px;font-size:12px}.slot .n{font-size:11px}}
 #bars{margin-bottom:10px}
-.bar{height:15px;background:rgba(0,0,0,.55);border:1px solid var(--line);position:relative;margin-top:5px}
-.bar i{position:absolute;inset:0;width:0%;transition:width .12s linear}
-.bar span{position:absolute;right:6px;top:0;font-family:'Barlow Condensed';font-size:14px;line-height:15px;text-shadow:0 1px 2px #000}
-#hpFill{background:var(--hp)} #shFill{background:var(--sh)}
+.bar{height:17px;background:rgba(6,10,14,.7);border:1px solid rgba(0,0,0,.6);border-radius:9px;position:relative;margin-top:6px;
+  box-shadow:inset 0 1px 3px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.06)}
+.bar i{position:absolute;inset:2px;left:2px;width:0%;border-radius:7px;transition:width .12s linear;
+  background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.16) 0 2px,transparent 2px 18px)}
+.bar span{position:absolute;right:8px;top:0;font-family:'Barlow Condensed';font-weight:700;font-size:14px;line-height:17px;text-shadow:0 1px 2px #000}
+#hpFill{background:linear-gradient(180deg,#69e0a0,var(--hp));box-shadow:0 0 10px rgba(79,212,138,.55)}
+#shFill{background:linear-gradient(180deg,#7cc9ff,var(--sh));box-shadow:0 0 10px rgba(79,184,255,.55)}
 #slots{display:flex;gap:6px}
 .slot{width:84px;height:58px;background:var(--panel);border:1px solid var(--line);position:relative;padding:5px;
   font-family:'Barlow Condensed';font-size:14px;line-height:1.1;color:var(--dim);overflow:hidden}
@@ -140,6 +143,7 @@ canvas{display:block;touch-action:none}
 #tPause{width:46px;height:46px;left:16px;top:16px;font-size:13px;border-radius:50%}
 #tUnstuck{width:60px;height:60px;left:16px;top:72px;font-size:13px;background:rgba(255,90,77,.32);border-radius:50%}
 #tEmote{width:60px;height:60px;left:16px;top:142px;font-size:13px;border-radius:50%}
+#tEdit{width:60px;height:60px;left:16px;top:212px;font-size:13px;background:rgba(111,208,255,.28);border-radius:50%}
 #spectate{position:fixed;left:0;right:0;bottom:0;padding:16px;display:flex;gap:12px;justify-content:center;
   align-items:center;background:linear-gradient(transparent,rgba(6,10,14,.85));z-index:4;pointer-events:auto}
 #spectate span{font-family:'Barlow Condensed';font-size:21px;color:var(--dim)}
@@ -235,6 +239,7 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
   <div class="tb" id="tBuild">Bauen</div>
   <div class="tb dyn ready" id="tUse"><i>Aktion</i><b>—</b></div>
   <div class="tb" id="tReload">Nachladen</div>
+  <div class="tb" id="tEdit">Edit</div>
   <div class="tb dyn" id="tMat"><i>Material</i><b>Holz</b></div>
   <div id="tBuildPieces">
     <div class="tb" id="tWall">Wand</div><div class="tb" id="tRamp">Rampe</div>
@@ -357,6 +362,7 @@ const BIND_ACTIONS=[
   {a:"roof",     label:"Dach"},
   {a:"matCycle", label:"Material wechseln"},
   {a:"drop",     label:"Abwerfen"},
+  {a:"edit",     label:"Editieren (Wand)"},
   {a:"emote",    label:"Emote"},
   {a:"unstuck",  label:"Freikommen"},
   {a:"pause",    label:"Pause"},
@@ -366,7 +372,7 @@ const BIND_ACTIONS=[
 const DEFAULT_BINDS={
   forward:"KeyW",back:"KeyS",left:"KeyA",right:"KeyD",sprint:"ShiftLeft",jump:"Space",
   fire:"Mouse0",aim:"Mouse2",reload:"KeyR",interact:"KeyE",buildToggle:"KeyQ",
-  wall:"KeyZ",ramp:"KeyX",floor:"KeyC",roof:"KeyV",matCycle:"KeyF",drop:"KeyG",
+  wall:"KeyZ",ramp:"KeyX",floor:"KeyC",roof:"KeyV",matCycle:"KeyF",drop:"KeyG",edit:"KeyB",
   emote:"KeyT",unstuck:"KeyK",pause:"Escape",
   slot1:"Digit1",slot2:"Digit2",slot3:"Digit3",slot4:"Digit4",slot5:"Digit5",slot6:"Digit6"
 };
@@ -419,6 +425,7 @@ function renderKeysList(){
   html.push("<li><b>"+[BINDS.wall,BINDS.ramp,BINDS.floor,BINDS.roof].map(codeLabel).join(" ")+"</b>Wand / Rampe / Boden / Dach</li>");
   html.push("<li><b>"+codeLabel(BINDS.matCycle)+"</b>Material</li>");
   html.push("<li><b>"+codeLabel(BINDS.drop)+"</b>Abwerfen</li>");
+  html.push("<li><b>"+codeLabel(BINDS.edit)+"</b>Editieren (Wand: Fenster/Tür)</li>");
   html.push("<li><b>"+codeLabel(BINDS.emote)+"</b>Emote</li>");
   html.push("<li><b>"+codeLabel(BINDS.unstuck)+"</b>Freikommen</li>");
   html.push("<li><b>Mausrad</b>Slot / Bauteil</li>");
@@ -517,10 +524,11 @@ function initGfx(){
   renderer.setPixelRatio(Math.min(devicePixelRatio,LOWFX?1:1.75));
   renderer.setSize(innerWidth,innerHeight);
   if(THREE.sRGBEncoding!==undefined)renderer.outputEncoding=THREE.sRGBEncoding;
+  if(THREE.ACESFilmicToneMapping!==undefined){renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.12;}
   document.body.insertBefore(renderer.domElement,document.body.firstChild);
   // Himmelskuppel mit Farbverlauf
   const skyMat=new THREE.ShaderMaterial({side:THREE.BackSide,depthWrite:false,
-    uniforms:{top:{value:new THREE.Color(0x2f6fc4)},mid:{value:new THREE.Color(0x9fd0f0)},bot:{value:new THREE.Color(0xf2e2c4)}},
+    uniforms:{top:{value:new THREE.Color(0x1f6fe0)},mid:{value:new THREE.Color(0x9fe0fb)},bot:{value:new THREE.Color(0xffe9b8)}},
     vertexShader:"varying vec3 vP; void main(){ vP=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }",
     fragmentShader:"uniform vec3 top; uniform vec3 mid; uniform vec3 bot; varying vec3 vP;"+
       "void main(){ float h=normalize(vP).y; vec3 c = h>0.0 ? mix(mid,top,pow(h,0.65)) : mix(mid,bot,pow(-h,0.5)); gl_FragColor=vec4(c,1.0); }"});
@@ -1439,9 +1447,15 @@ function placePiece(e,t,silent){
   const grp=new THREE.Group(); grp.position.copy(t.pos); grp.rotation.y=t.rotY;
   staticAdd(grp); grp.updateMatrixWorld(true);
   const cols=[];
+  let wallSegs=null;
   if(t.type==="wall"){
-    const m=new THREE.Mesh(BOX,mat); m.scale.set(G-.06,G-.06,.3); grp.add(m);
-    cols.push(addBox(m,null,hp,true));
+    const H=G-.06, segH=H/3, rowY=[-H/3,0,H/3];
+    wallSegs=[];
+    for(let i=0;i<3;i++){
+      const m=new THREE.Mesh(BOX,mat); m.scale.set(G-.06,segH,.3); m.position.y=rowY[i]; grp.add(m);
+      const col=addBox(m,null,hp,true);
+      cols.push(col); wallSegs.push({mesh:m,col:col,open:false});
+    }
   } else if(t.type==="floor"){
     const m=new THREE.Mesh(BOX,mat); m.scale.set(G-.06,.34,G-.06); grp.add(m);
     cols.push(addBox(m,null,hp,true));
@@ -1470,7 +1484,7 @@ function placePiece(e,t,silent){
     }
   }
   e.mats[mt]-=BUILD_COST;
-  const rec={grp:grp,cols:cols,type:t.type,mat:mt,key:t.key,hp:hp,maxhp:hp,owner:e};
+  const rec={grp:grp,cols:cols,type:t.type,mat:mt,key:t.key,hp:hp,maxhp:hp,owner:e,segs:wallSegs,editState:"full"};
   cols.forEach(c=>{c.buildRec=rec;});
   built.set(t.key,rec);
   if(built.size>BUILD_LIMIT){                      // ältestes Bauteil abräumen (FPS-Schutz)
@@ -1481,6 +1495,40 @@ function placePiece(e,t,silent){
   if(!silent){ if(e===player)sndBuild(mt,1); else sndBuild(mt,distVol(t.pos,70)*.8); }
   puff(t.pos,mt);
   return true;
+}
+/* ---------- Editieren (Fenster/Tür aus Wänden schneiden, wie in Fortnite) ---------- */
+const EDIT_STATES=["full","window","door","open"];
+function editOpenRows(state){
+  return state==="window"?[1]:state==="door"?[0,1]:state==="open"?[0,1,2]:[];
+}
+function setSegOpen(rec,seg,open){
+  // Collider bleibt immer registriert (fuer Treffer/Ziel-Erkennung beim erneuten
+  // Editieren) — "offen" heisst nur: Spieler koennen durchlaufen (noClip) und
+  // das Segment ist unsichtbar. So bleibt die Wand jederzeit re-editierbar.
+  if(seg.open===open)return;
+  seg.open=open; seg.mesh.visible=!open;
+  if(seg.col)seg.col.noClip=open;
+}
+function applyEditState(rec,state){
+  rec.editState=state;
+  const open=editOpenRows(state);
+  rec.segs.forEach((seg,i)=>setSegOpen(rec,seg,open.includes(i)));
+}
+function cycleEdit(rec){
+  if(!rec||rec.type!=="wall"||!rec.segs)return null;
+  const idx=EDIT_STATES.indexOf(rec.editState||"full");
+  const next=EDIT_STATES[(idx+1)%EDIT_STATES.length];
+  applyEditState(rec,next);
+  return next;
+}
+function editTargetFor(e,range){
+  let eye,dir;
+  if(e===player){ eye=camera.position; dir=new THREE.Vector3(); camera.getWorldDirection(dir); }
+  else { eye=new THREE.Vector3(e.pos.x,e.pos.y+1.5,e.pos.z);
+    dir=new THREE.Vector3(-Math.sin(e.yaw)*Math.cos(e.pitch||0),Math.sin(e.pitch||0),-Math.cos(e.yaw)*Math.cos(e.pitch||0)); }
+  const h=rayHit(eye.x,eye.y,eye.z,dir.x,dir.y,dir.z,range||6.5);
+  if(h&&h.col&&h.col.buildRec&&h.col.buildRec.type==="wall"&&h.col.buildRec.owner===e)return h.col.buildRec;
+  return null;
 }
 function damageBuild(rec,dmg){
   rec.hp-=dmg;
@@ -2055,7 +2103,7 @@ function spawnBots(n){
       cool:0, reloading:0, aiming:false, building:false, swing:0, kick:0, emoteT:0,
       heldItem:null, burstLeft:0, spin:0, using:null, useT:0, useTotal:0,
       skill:skill, react:rnd(.12,.45)/Math.max(.5,DIFF), aggr:rnd(.3,1),
-      builder:rnd(.55,1), looter:rnd(.55,1),
+      builder:clamp(skill*rnd(.75,1.05),.1,1), looter:rnd(.55,1),
       state:"drop",
       land: Math.random()<0.55
         ? new THREE.Vector3(poi.x+rnd(-30,30),0,poi.z+rnd(-30,30))
@@ -2768,6 +2816,7 @@ function botBuildFightStep(b,dt,to){
   }
   const dir=new THREE.Vector3(Math.cos(S.ang),0,Math.sin(S.ang));
   b.moveDir.copy(dir); b.speed=6.6;                 // die eigene Rampe hochlaufen
+  if(Math.random()<clamp(0.35-b.skill*0.3,0.02,0.35))S.fail+=0.4; // schwache Bots patzen öfter beim Baubattle
   b.yaw=angLerp(b.yaw,Math.atan2(-to.x,-to.z),.14); // Blick bleibt beim Gegner
   b.building=true;
 
@@ -2798,7 +2847,7 @@ function botBuildFightStep(b,dt,to){
     const sideL=new THREE.Vector3(-dir.z,0,dir.x), sideR=new THREE.Vector3(dir.z,0,-dir.x);
     const wallDir=(to.dot(sideL)>0)?sideL:sideR;   // die dem Gegner zugewandte Seite abdecken
     if(!botBuildPiece(b,"wall",wallDir))S.fail++;
-    if(botMats(b)>=BUILD_COST*10&&Math.random()<0.6){
+    if(botMats(b)>=BUILD_COST*10&&Math.random()<clamp(0.2+b.skill*0.45,0.12,0.85)){
       botBuildPiece(b,"wall",wallDir.clone().multiplyScalar(-1));
     }
     b.cool=.09; S.phase="ramp";
@@ -3017,9 +3066,14 @@ function botFight(b,dt){
   /* ---- Baubattle ---- */
   if(b.buildUp){ botBuildFightStep(b,dt,to); }
   b.buildCD-=dt;
+  // Baubattle-Wahrscheinlichkeit haengt direkt an der Bot-Staerke (skill/builder):
+  // schwache Bots ("Locker") gehen kaum in echte Baubattles, starke ("Profi") fast immer.
+  const battleChance=clamp(b.skill*0.55+b.builder*0.35,0.04,0.95);
   if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&los&&dist>5&&dist<80&&
      botMats(b)>=BUILD_COST*4&&built.size<BUILD_LIMIT*0.9&&
-     (b.hurtT>0||tgt.pos.y>b.pos.y+1.5||Math.random()<0.85)){
+     ((tgt.pos.y>b.pos.y+1.5&&Math.random()<clamp(battleChance*1.3,0.08,0.98))||
+      (b.hurtT>0&&Math.random()<clamp(battleChance*1.15,0.06,0.97))||
+      Math.random()<battleChance)){
     // Duell: sofort hochbauen und Höhe erkämpfen
     b.buildUp={ang:Math.atan2(to.z,to.x)+rnd(-.3,.3),phase:"floor",left:ri(8,16),
                levels:0,fail:0,life:0,climbT:0,y0:b.pos.y,roofed:false};
@@ -3722,6 +3776,12 @@ addEventListener("keydown",e=>{
   if(e.code===BINDS.interact)interact();
   if(e.code===BINDS.unstuck)unstuck();
   if(e.code===BINDS.drop)dropSelected(player);
+  if(e.code===BINDS.edit){
+    const rec=editTargetFor(player);
+    if(rec){ const st=cycleEdit(rec);
+      if(st){ sndBuild(rec.mat,1);
+        feed("Editiert: "+({full:"Ganz",window:"Fenster",door:"Tür",open:"Offen"}[st])); } }
+  }
   if(e.code===BINDS.emote){player.emoteT=player.emoteT>0?0:4;}
   for(let i=1;i<=6;i++) if(e.code===BINDS["slot"+i]){player.sel=i-1;player.build=false;player.reloading=0;player.using=null;sndSwitch();updateHUD();}
 });
@@ -3759,7 +3819,7 @@ const touchMove={x:0,y:0};
 let stickId=null,stickOx=0,stickOy=0,lookId=null,lookX=0,lookY=0;
 let editMode=false;
 const LAYOUT_KEY="sturmfeld_touch_layout_v2";
-const DRAGGABLE_IDS=["tFire","tAds","tJump","tBuild","tUse","tReload","tMat","tPause","tUnstuck","tEmote","tBuildPieces"];
+const DRAGGABLE_IDS=["tFire","tAds","tJump","tBuild","tUse","tReload","tMat","tPause","tUnstuck","tEmote","tBuildPieces","tEdit"];
 function loadLayout(){ try{return JSON.parse(localStorage.getItem(LAYOUT_KEY)||"{}");}catch(e){return {};} }
 function saveLayoutEntry(id,l,t){ const L=loadLayout(); L[id]={l:l,t:t}; try{localStorage.setItem(LAYOUT_KEY,JSON.stringify(L));}catch(e){} }
 function applyTouchLayout(){
@@ -3832,6 +3892,12 @@ function initTouch(){
     setMatButton();updateHUD();},null);
   hold("tPause",()=>setPaused(true),null);
   hold("tUnstuck",()=>unstuck(),null);
+  hold("tEdit",()=>{
+    const rec=editTargetFor(player);
+    if(rec){ const st=cycleEdit(rec);
+      if(st){ sndBuild(rec.mat,1);
+        feed("Editiert: "+({full:"Ganz",window:"Fenster",door:"Tür",open:"Offen"}[st])); } }
+  },null);
   hold("tEmote",()=>{player.emoteT=player.emoteT>0?0:4;},null);
   DRAGGABLE_IDS.forEach(id=>{const n=el(id);if(n)makeDraggable(n);});
   applyTouchLayout(); setMatButton();
