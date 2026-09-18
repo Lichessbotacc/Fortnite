@@ -4382,18 +4382,17 @@ addEventListener("keydown",e=>{
 });
 addEventListener("keyup",e=>{keys[e.code]=false;});
 function syncMouseActions(){ mouseDown=actionDown("fire"); mouseRight=actionDown("aim"); }
-// Statt einzelne down/up-Flags zu pflegen (die bei gleichzeitig gedrückten
-// Tasten leicht auseinanderlaufen und z.B. beim Feuern das Zielen "vergessen"
-// konnten), wird der Button-Zustand bei JEDEM Maus-Event komplett aus der
-// verlässlichen e.buttons-Bitmaske neu gesetzt. Dadurch bleibt Rechtsklick
-// (Zielen) zuverlässig aktiv, während gleichzeitig mit Linksklick geschossen wird.
-function syncFromButtonsBitmask(e){
-  if(typeof e.buttons!=="number")return;
-  rawMouse[0]=!!(e.buttons&1); rawMouse[2]=!!(e.buttons&2); rawMouse[1]=!!(e.buttons&4);
-  syncMouseActions();
-}
-addEventListener("mousedown",e=>{ if(e.button<=2){rawMouse[e.button]=true; syncFromButtonsBitmask(e); syncMouseActions();} });
-addEventListener("mouseup",e=>{ if(e.button<=2){rawMouse[e.button]=false; syncFromButtonsBitmask(e); syncMouseActions();} });
+// Wichtig: NUR die jeweils tatsaechlich geaenderte Taste anfassen (e.button),
+// nie den kompletten Zustand aus e.buttons neu ableiten — die buttons-Bitmaske
+// ist unter Pointer Lock in manchen Browsern unzuverlaessig und hat vorher
+// dazu gefuehrt, dass Rechtsklick (Zielen) faelschlich als losgelassen galt,
+// sobald waehrend des Schiessens die Maus bewegt wurde.
+addEventListener("mousedown",e=>{ if(e.button<=2){rawMouse[e.button]=true; syncMouseActions();} });
+addEventListener("mouseup",e=>{ if(e.button<=2){rawMouse[e.button]=false; syncMouseActions();} });
+// Sicherheitsnetz nur fuer den Fall, dass ein mouseup wirklich mal verloren
+// geht (z.B. Fokuswechsel): beim Loslassen ALLER Tasten (buttons===0) wird
+// hart zurueckgesetzt, aber niemals waehrend noch Tasten gehalten werden.
+addEventListener("mousemove",e=>{ if(e.buttons===0){rawMouse[0]=rawMouse[1]=rawMouse[2]=false; syncMouseActions();} });
 addEventListener("contextmenu",e=>e.preventDefault());
 addEventListener("wheel",e=>{
   if(!running||paused)return;
@@ -4403,7 +4402,6 @@ addEventListener("wheel",e=>{
 },{passive:true});
 addEventListener("mousemove",e=>{
   if(document.pointerLockElement!==renderer.domElement)return;
-  syncFromButtonsBitmask(e);   // Sicherheitsnetz: haelt Aim/Fire-Zustand konsistent
   const s=SENS.v*(player.aiming?.6:1);
   player.yaw-=e.movementX*s; player.pitch-=e.movementY*s;
   player.pitch=clamp(player.pitch,-1.35,1.25);
