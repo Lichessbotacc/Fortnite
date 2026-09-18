@@ -2975,9 +2975,13 @@ function botSee(b,dt){
   if(best){
     if(b.target!==best)b.reactT=b.react;
     b.target=best; b.lastSeen=best.pos.clone(); b.seenT=4.5; b.targetDist=bd;
-  } else if(finalDuel&&_cand.length){
-    // kein Sichtkontakt, aber im letzten 1vs1 trotzdem Richtung merken statt aufzugeben
-    b.target=_cand[0].t; b.lastSeen=_cand[0].t.pos.clone(); b.seenT=Math.max(b.seenT,1.5);
+  } else if(finalDuel&&_cand.length&&b.target===_cand[0].t){
+    // Kein Sichtkontakt mehr, aber es ist bereits ein laufendes Duell mit
+    // genau diesem Gegner (z.B. der Gegner hat gerade eine Wand hochgezogen)
+    // — dann darf der Bot kurz weiter "wissen", wo er ungefaehr ist, statt
+    // die Verfolgung sofort abzubrechen. Ein NEUES Ziel wird ohne Sichtkontakt
+    // dagegen nie blind durch Waende hinweg vergeben.
+    b.target=_cand[0].t; b.seenT=Math.max(b.seenT,1.5);
   } else if(b.seenT<=0) b.target=null;
 }
 function botAim(b,dt,tgt){
@@ -3427,7 +3431,13 @@ function botFight(b,dt){
   if(w.inMag<=0)startReload(b);
   if(w.inMag<w.mag*0.3&&(!los||d>50)&&b.reloading<=0)startReload(b);
 
-  const to=new THREE.Vector3().subVectors(tgt.pos,b.pos); to.y=0;
+  // Ohne Sichtkontakt kennt der Bot NICHT die Live-Position des Gegners
+  // (kein Wallhack) — er läuft nur zur zuletzt gesehenen Stelle, wie ein
+  // Mensch es auch tun würde. Der "wallHit"-Belagerungsfall weiter unten
+  // (Gegner hat sich gerade direkt vor ihm eingemauert) ist die bewusste
+  // Ausnahme und wird separat behandelt.
+  const trackPos=los?tgt.pos:(b.lastSeen||tgt.pos);
+  const to=new THREE.Vector3().subVectors(trackPos,b.pos); to.y=0;
   const dist=to.length()||1; to.normalize();
   const side=new THREE.Vector3(-to.z,0,to.x).multiplyScalar(b.strafe);
   b.strafeT-=dt; if(b.strafeT<=0){ b.strafe*=-1; b.strafeT=rnd(.7,2.0); }
@@ -3470,7 +3480,9 @@ function botFight(b,dt){
     b.speed=b.aiming?4.4:6.2;
   }
 
-  const aimAt=wallHit?new THREE.Vector3(wallHit.x,wallHit.y,wallHit.z):new THREE.Vector3(tgt.pos.x,tgt.pos.y+1.1,tgt.pos.z);
+  const aimAt=wallHit?new THREE.Vector3(wallHit.x,wallHit.y,wallHit.z)
+    :los?new THREE.Vector3(tgt.pos.x,tgt.pos.y+1.1,tgt.pos.z)
+    :new THREE.Vector3(trackPos.x,trackPos.y+1.1,trackPos.z);
   const aimErr=botAim(b,dt,aimAt);
 
   /* ---- Baubattle ---- */
