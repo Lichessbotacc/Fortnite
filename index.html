@@ -2226,14 +2226,16 @@ function updateAmbient(){
 /* ======================================================================
    STURM
    ====================================================================== */
-const storm={cx:0,cz:0,r:MAP*0.8,tx:0,tz:0,tr:0,dps:1,phase:0,t:0,state:"wait",mesh:null};
-const PHASES=[{wait:46,move:46,f:.62,dps:1},{wait:36,move:38,f:.58,dps:2},{wait:30,move:32,f:.55,dps:4},
-              {wait:24,move:26,f:.5,dps:6},{wait:20,move:22,f:.45,dps:8},{wait:17,move:19,f:.4,dps:10},
-              {wait:14,move:16,f:.35,dps:12},{wait:12,move:14,f:.2,dps:14}];
+const storm={cx:0,cz:0,r:MAP*0.8,tx:0,tz:0,tr:0,dps:1,phase:0,t:0,state:"wait",mesh:null,tickT:1,tick:false};
+// Original Fortnite-Sturmwerte (Wartezeit / Schrumpfzeit / Schaden pro Sekunde-Tick),
+// siehe die klassische 9-Phasen-Tabelle: 1,1,2,5,8,10,10,10,10 dmg/Tick.
+const PHASES=[{wait:200,move:180,f:.62,dps:1},{wait:120,move:120,f:.58,dps:1},{wait:120,move:90,f:.55,dps:2},
+              {wait:80, move:70, f:.5, dps:5},{wait:70, move:60, f:.45,dps:8},{wait:30, move:60, f:.4, dps:10},
+              {wait:20, move:50, f:.35,dps:10},{wait:15, move:40, f:.2, dps:10},{wait:15, move:40,f:.12,dps:10}];
 function initStorm(){
   storm.cx=rnd(-70,70); storm.cz=rnd(-70,70); storm.r=MAP*0.8;
   storm.tx=storm.cx; storm.tz=storm.cz; storm.tr=storm.r;
-  storm.phase=0; storm.t=PHASES[0].wait; storm.state="wait"; storm.dps=0.5;
+  storm.phase=0; storm.t=PHASES[0].wait; storm.state="wait"; storm.dps=1; storm.tickT=1; storm.tick=false;
   if(!storm.mesh){
     const g=new THREE.CylinderGeometry(1,1,440,56,1,true);
     storm.mesh=new THREE.Mesh(g,new THREE.MeshBasicMaterial({
@@ -2242,6 +2244,10 @@ function initStorm(){
   }
 }
 function updateStorm(dt){
+  // Fester 1-Sekunden-Tick wie im echten Fortnite: der Sturm schadet nicht
+  // kontinuierlich mit dt, sondern in exakt einem Schub pro Sekunde.
+  storm.tickT-=dt;
+  if(storm.tickT<=0){ storm.tick=true; storm.tickT+=1; } else storm.tick=false;
   storm.t-=dt;
   if(storm.state==="wait"&&storm.t<=0){
     const p=PHASES[Math.min(storm.phase,PHASES.length-1)];
@@ -3314,7 +3320,7 @@ function updateBot(b,dt){
     b.moveDir=to; b.speed=8.4;                    // Sprint aus dem Sturm
     b.yaw=bYaw(b,Math.atan2(-to.x,-to.z),.16);
     b.pitch=lerp(b.pitch,0,.1);
-    if(outside(b.pos.x,b.pos.z,0))damage(b,Math.max(0.6,storm.dps)*dt,null);
+    if(outside(b.pos.x,b.pos.z,0)&&storm.tick)damage(b,storm.dps,null);
     b.stormFlee=true; b.forceT=0; b.commitT=0;
     // Fortschritt Richtung Zentrum messen — sonst hängt der Bot am Hindernis fest
     const dCen=Math.hypot(b.pos.x-storm.cx,b.pos.z-storm.cz);
@@ -4249,6 +4255,10 @@ function updatePlay(dt){
   }
   const held=player.slots[player.sel];
   if(!heldWeapon(player)&&player.spin>0)player.spin=0;
+  // Automatisch nachladen, sobald das Magazin leer ist und Munition da ist —
+  // nicht erst, wenn man versucht abzudruecken.
+  if(w&&w.kind==="weapon"&&w.inMag<=0&&player.reloading<=0&&!player.using&&
+     player.ammo[w.def.ammo]>0){ startReload(player); }
   if(mouseDown&&!player.using){
     const auto=player.build||!held||held.kind==="pick"||(held.kind==="weapon"&&held.def.auto);
     if(auto||!firedOnce)primary();
@@ -4259,12 +4269,13 @@ function updatePlay(dt){
   }
 
   if(outside(player.pos.x,player.pos.z,0)){
-    damage(player,Math.max(0.6,storm.dps)*dt,null);
-    stormWarnT-=dt;
-    if(stormWarnT<=0){ stormWarnT=1.0; sndStormTick(); flashDamage();
-      feed("Du bist im Sturm! "+Math.ceil(player.hp)+" HP"); }
+    if(storm.tick){
+      damage(player,storm.dps,null);
+      sndStormTick(); flashDamage();
+      feed("Du bist im Sturm! "+Math.ceil(player.hp)+" HP");
+    }
     el("stormFx").style.opacity=.85;
-  } else { el("stormFx").style.opacity=0; stormWarnT=0; }
+  } else { el("stormFx").style.opacity=0; }
   el("lowhp").style.opacity=player.hp<35?(1-player.hp/35)*0.9:0;
 
   // Bauvorschau
@@ -4346,8 +4357,18 @@ addEventListener("keydown",e=>{
 });
 addEventListener("keyup",e=>{keys[e.code]=false;});
 function syncMouseActions(){ mouseDown=actionDown("fire"); mouseRight=actionDown("aim"); }
-addEventListener("mousedown",e=>{ if(e.button<=2){rawMouse[e.button]=true; syncMouseActions();} });
-addEventListener("mouseup",e=>{ if(e.button<=2){rawMouse[e.button]=false; syncMouseActions();} });
+// Statt einzelne down/up-Flags zu pflegen (die bei gleichzeitig gedrückten
+// Tasten leicht auseinanderlaufen und z.B. beim Feuern das Zielen "vergessen"
+// konnten), wird der Button-Zustand bei JEDEM Maus-Event komplett aus der
+// verlässlichen e.buttons-Bitmaske neu gesetzt. Dadurch bleibt Rechtsklick
+// (Zielen) zuverlässig aktiv, während gleichzeitig mit Linksklick geschossen wird.
+function syncFromButtonsBitmask(e){
+  if(typeof e.buttons!=="number")return;
+  rawMouse[0]=!!(e.buttons&1); rawMouse[2]=!!(e.buttons&2); rawMouse[1]=!!(e.buttons&4);
+  syncMouseActions();
+}
+addEventListener("mousedown",e=>{ if(e.button<=2){rawMouse[e.button]=true; syncFromButtonsBitmask(e); syncMouseActions();} });
+addEventListener("mouseup",e=>{ if(e.button<=2){rawMouse[e.button]=false; syncFromButtonsBitmask(e); syncMouseActions();} });
 addEventListener("contextmenu",e=>e.preventDefault());
 addEventListener("wheel",e=>{
   if(!running||paused)return;
@@ -4357,6 +4378,7 @@ addEventListener("wheel",e=>{
 },{passive:true});
 addEventListener("mousemove",e=>{
   if(document.pointerLockElement!==renderer.domElement)return;
+  syncFromButtonsBitmask(e);   // Sicherheitsnetz: haelt Aim/Fire-Zustand konsistent
   const s=SENS.v*(player.aiming?.6:1);
   player.yaw-=e.movementX*s; player.pitch-=e.movementY*s;
   player.pitch=clamp(player.pitch,-1.35,1.25);
