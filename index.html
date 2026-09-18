@@ -2870,11 +2870,12 @@ function botBuildFightStep(b,dt,to){
   const dir=new THREE.Vector3(Math.cos(S.ang),0,Math.sin(S.ang));
   b.moveDir.copy(dir); b.speed=6.6;                 // die eigene Rampe hochlaufen
   if(Math.random()<clamp(0.35-b.skill*0.3,0.02,0.35))S.fail+=0.4; // schwache Bots patzen öfter beim Baubattle
-  b.yaw=angLerp(b.yaw,Math.atan2(-to.x,-to.z),.14); // Blick bleibt beim Gegner
   b.building=true;
 
-  // Steigen laeuft unabhaengig vom Bau-Cooldown weiter
+  // Steigen laeuft unabhaengig vom Bau-Cooldown weiter — hier schaut der Bot
+  // wieder zum Gegner, weil er gerade nichts Neues platziert.
   if(S.phase==="climb"){
+    b.yaw=angLerp(b.yaw,Math.atan2(-to.x,-to.z),.14);
     S.climbT+=dt;
     if(b.pos.y>=S.y0+G*0.75||Math.floor(b.pos.y/G+0.001)>Math.floor(S.y0/G+0.001)){
       S.left--; S.levels++; S.climbT=0; S.y0=b.pos.y;
@@ -2886,39 +2887,54 @@ function botBuildFightStep(b,dt,to){
     }
     return;
   }
-  if(b.cool>0)return;
+
+  // ECHTE Box: alle vier Seiten der Etage dicht machen — aber der Bot dreht
+  // sich zu JEDER Seite hin, bevor er sie schliesst, statt in einem einzigen
+  // Frame blind rundherum zu bauen. Genau das sah vorher aus, als würde er
+  // Wände "neben oder hinter sich" setzen, ohne hinzugucken.
+  if(S.phase==="wall"&&S.wallQueue&&S.wallQueue.length){
+    const wd=S.wallQueue[0];
+    const aligned=botAimBuild(b,wd,dt);
+    if(aligned&&b.cool<=0){
+      if(botMats(b)>=BUILD_COST&&botBuildPiece(b,"wall",wd))S.wallPlaced=(S.wallPlaced||0)+1;
+      S.wallQueue.shift();
+      b.cool=.09;
+      if(!S.wallQueue.length){
+        if(!S.wallPlaced)S.fail++; else S.fail=Math.max(0,S.fail-0.5);
+        S.wallPlaced=0; S.phase="ramp";
+      }
+    }
+    return;
+  }
+
+  if(b.cool>0){ b.yaw=angLerp(b.yaw,Math.atan2(-to.x,-to.z),.14); return; }
   const c=cellOf(b.pos.x,b.pos.y,b.pos.z);
 
   if(S.phase==="floor"){
-    // Boden unter den Fuessen — genau das haben die Bots vorher nie gebaut
+    // Boden unter den Fuessen — dafür schaut der Bot kurz nach unten, wie
+    // ein Spieler es beim Bodenlegen unwillkürlich tut.
     const t=floorTargetAt(c.cx,c.cy,c.cz);
+    b.pitch=lerp(b.pitch,-0.45,.2);
     if(!built.has(t.key))placePiece(b,t);
     b.cool=.09; S.phase="wall";
-  } else if(S.phase==="wall"){
-    // ECHTE Box: alle vier Seiten der Etage dicht machen, nicht nur die Seite
-    // zum Gegner — das war der Hauptgrund, warum die Baubattles vorher löchrig
-    // und unglaubwürdig wirkten. Reihenfolge: Gegnerseite zuerst (wichtigste Deckung).
     const sideL=new THREE.Vector3(-dir.z,0,dir.x), sideR=new THREE.Vector3(dir.z,0,-dir.x);
     const front=(to.dot(sideL)>0)?sideL:sideR;
     const back=front.clone().multiplyScalar(-1);
-    const dirs=[front,back,new THREE.Vector3(1,0,0),new THREE.Vector3(-1,0,0),
-                new THREE.Vector3(0,0,1),new THREE.Vector3(0,0,-1)]
+    S.wallQueue=[front,back,new THREE.Vector3(1,0,0),new THREE.Vector3(-1,0,0),
+                 new THREE.Vector3(0,0,1),new THREE.Vector3(0,0,-1)]
       .filter((v,i,arr)=>arr.findIndex(w=>w.distanceTo(v)<0.01)===i); // Duplikate raus
-    let placed=0;
-    for(const wd of dirs){
-      if(botMats(b)<BUILD_COST)break;
-      if(botBuildPiece(b,"wall",wd))placed++;
-    }
-    if(placed===0)S.fail++; else S.fail=Math.max(0,S.fail-0.5);
-    b.cool=.10; S.phase="ramp";
-  } else {
-    const ok=botBuildPiece(b,"ramp",dir);
-    b.cool=.10;
-    if(ok){
-      if(b.onGround){ b.vel.y=9.8; b.jumpCD=.35; }
-      S.y0=b.pos.y; S.phase="climb"; S.climbT=0;
-    } else {
-      S.fail++; S.ang+=Math.PI/2; S.phase="floor";  // blockiert -> 90er und neu ansetzen
+    S.wallPlaced=0;
+  } else if(S.phase==="ramp"){
+    // Der Bot dreht sich erst zur Rampenrichtung, bevor er sie setzt.
+    if(botAimBuild(b,dir,dt)){
+      const ok=botBuildPiece(b,"ramp",dir);
+      b.cool=.10;
+      if(ok){
+        if(b.onGround){ b.vel.y=9.8; b.jumpCD=.35; }
+        S.y0=b.pos.y; S.phase="climb"; S.climbT=0;
+      } else {
+        S.fail++; S.ang+=Math.PI/2; S.phase="floor";  // blockiert -> 90er und neu ansetzen
+      }
     }
   }
 
