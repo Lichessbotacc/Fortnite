@@ -154,6 +154,27 @@ canvas{display:block;touch-action:none}
 #specTop{position:fixed;top:14px;left:50%;transform:translateX(-50%);font-family:'Barlow Condensed';
   font-size:26px;background:var(--panel);border:1px solid var(--line);padding:6px 16px;z-index:4;text-align:center}
 #specTop small{display:block;font-size:15px;color:var(--dim);letter-spacing:1px}
+#specHud{position:fixed;left:18px;bottom:18px;width:300px;z-index:4;pointer-events:none}
+#specHud .bar{height:15px;background:rgba(6,10,14,.7);border:1px solid rgba(0,0,0,.6);border-radius:8px;
+  position:relative;margin-top:6px;box-shadow:inset 0 1px 3px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.06)}
+#specHud .bar i{position:absolute;inset:2px;left:2px;width:0%;border-radius:6px;transition:width .15s linear;
+  background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.16) 0 2px,transparent 2px 18px)}
+#specHud .bar span{position:absolute;right:8px;top:0;font-family:'Barlow Condensed';font-weight:700;
+  font-size:12px;line-height:15px;text-shadow:0 1px 2px #000}
+#specMats{display:flex;gap:6px;margin-top:10px}
+#specMats .mat{background:var(--panel);border:1px solid var(--line);padding:5px 9px;flex:1;text-align:center;
+  font-family:'Barlow Condensed';font-size:17px;color:var(--ink)}
+#specMats .mat b{color:var(--dim);font-size:12px;display:block;font-weight:500;letter-spacing:.5px}
+#specWeap{margin-top:9px;font-family:'Barlow Condensed';font-size:18px;background:var(--panel);
+  border:1px solid var(--line);padding:5px 10px;color:var(--ink)}
+#specWeap small{display:block;font-size:12px;color:var(--dim);letter-spacing:.5px}
+#specSlots{display:flex;gap:5px;margin-top:8px}
+#specSlots .slot{width:47px;height:40px;background:var(--panel);border:1px solid var(--line);position:relative;
+  padding:4px;font-family:'Barlow Condensed';font-size:11px;line-height:1.05;color:var(--dim);overflow:hidden}
+#specSlots .slot .n{position:absolute;bottom:2px;left:3px;right:3px;color:var(--ink);font-size:10px}
+#specSlots .slot .q{position:absolute;top:2px;right:3px;font-size:11px;color:var(--gold)}
+#specSlots .slot .r{position:absolute;top:0;left:0;right:0;height:3px}
+#specSlots .slot.sel{border-color:#fff;background:rgba(40,60,80,.85)}
 
 #editBar{position:fixed;top:0;left:0;right:0;padding:16px;display:flex;gap:12px;justify-content:center;
   align-items:center;background:linear-gradient(rgba(6,10,14,.92),transparent);z-index:8}
@@ -255,6 +276,15 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
   <button id="specEnd">Ergebnis ansehen</button>
 </div>
 <div id="specTop" class="hidden"></div>
+<div id="specHud" class="hidden">
+  <div id="specBars">
+    <div class="bar"><i id="specHpFill" style="background:linear-gradient(180deg,#69e0a0,var(--hp));box-shadow:0 0 10px rgba(79,212,138,.55)"></i><span id="specHpTxt">100</span></div>
+    <div class="bar"><i id="specShFill" style="background:linear-gradient(180deg,#7cc9ff,var(--sh));box-shadow:0 0 10px rgba(79,184,255,.55)"></i><span id="specShTxt">0</span></div>
+  </div>
+  <div id="specMats"></div>
+  <div id="specWeap"></div>
+  <div id="specSlots"></div>
+</div>
 
 <div id="editBar" class="hidden">
   <span>Ziehe die Symbole an die gewünschte Stelle</span>
@@ -2107,12 +2137,12 @@ function spawnBots(n){
       skill:skill, react:rnd(.12,.45)/Math.max(.5,DIFF), aggr:rnd(.3,1),
       builder:clamp(skill*rnd(.75,1.05),.1,1), looter:rnd(.55,1),
       state:"drop",
-      land: Math.random()<0.55
-        ? new THREE.Vector3(poi.x+rnd(-30,30),0,poi.z+rnd(-30,30))
+      land: Math.random()<0.75
+        ? new THREE.Vector3(poi.x+rnd(-24,24),0,poi.z+rnd(-24,24))
         : new THREE.Vector3(rnd(-HALF+45,HALF-45),0,rnd(-HALF+45,HALF-45)),
       target:null, lastSeen:null, seenT:0, scanT:rnd(0,.4),
       aimYaw:0, aimPitch:0, fireT:0, strafe:Math.random()<.5?1:-1, strafeT:0,
-      goal:new THREE.Vector3(), goalT:0, lootGoal:null, lootT:rnd(0,1.2),
+      goal:new THREE.Vector3(), goalT:0, lootGoal:null, lootT:0,
       buildCD:rnd(1,4), rampT:0, harvest:null, harvestT:0, stuck:0, jumpCD:0,
       panic:0, retreat:0, chatT:rnd(20,90),
       turtle:null, turtleCD:rnd(4,10), farmGoal:null, farmScanT:rnd(0,1.5),
@@ -2669,11 +2699,15 @@ function botAim(b,dt,tgt){
   const wantPitch=Math.atan2(to.y,Math.hypot(to.x,to.z));
   // Wie ein Analogstick: feste Grad/s-Obergrenze statt linearem Lerp, damit
   // schnelle Bots nicht "snappen", sondern sichtbar rankurven — wie am Controller.
+  // Auf kurze Distanz dreht sich der Gegner-Winkel viel schneller (Strafe direkt
+  // vor der Nase), deshalb bekommt der Bot dort spürbar mehr Tempo — sonst
+  // rennt ihm das Ziel ständig davon und der Bot "starrt" nur, ohne zu schießen.
+  const closeBoost=clamp(1.9-d*0.018,1.0,1.9);
   let errYaw=((wantYaw-b.yaw+Math.PI)%6.283+6.283)%6.283-Math.PI;
   let errPitch=wantPitch-b.pitch;
-  const maxTurn=(2.0+b.skill*7.0)*dt;                 // rad Obergrenze pro Frame, skaliert mit Skill
-  b.yaw+=clamp(errYaw*0.55,-maxTurn,maxTurn);
-  b.pitch=clamp(b.pitch+clamp(errPitch*0.55,-maxTurn*0.6,maxTurn*0.6),-1.20,1.15);
+  const maxTurn=(3.3+b.skill*8.0)*dt*closeBoost;       // rad Obergrenze pro Frame, skaliert mit Skill+Distanz
+  b.yaw+=clamp(errYaw*0.6,-maxTurn,maxTurn);
+  b.pitch=clamp(b.pitch+clamp(errPitch*0.6,-maxTurn*0.6,maxTurn*0.6),-1.20,1.15);
   const err=Math.abs(((wantYaw-b.yaw+Math.PI)%6.283+6.283)%6.283-Math.PI);
   return err;
 }
@@ -2749,6 +2783,19 @@ function botStartHealBox(b){
   const base=cellOf(b.pos.x,b.pos.y,b.pos.z);
   b.turtle={stage:"walls",cx:base.cx,cy:base.cy,cz:base.cz,keys:[],t:0,fail:0};
 }
+function botAimBuild(b,dirVec,dt){
+  // Bevor ein Bot etwas baut, dreht er sich erst dorthin — wie ein Spieler,
+  // der mit dem Fadenkreuz auf die Bau-Stelle zielen muss. Schneller als die
+  // normale Kampf-Zielrate, weil ein kurzer Blickwechsel zum Bauen menschlich
+  // reflexartig passiert, aber eben nicht "durch den Hinterkopf".
+  const want=Math.atan2(-dirVec.x,-dirVec.z);
+  const e=((want-b.yaw+Math.PI)%6.283+6.283)%6.283-Math.PI;
+  const rate=10.5*dt;
+  b.yaw+=clamp(e,-rate,rate);
+  return Math.abs(((want-b.yaw+Math.PI)%6.283+6.283)%6.283-Math.PI)<0.20;
+}
+const DIRVEC={"x+":new THREE.Vector3(1,0,0),"x-":new THREE.Vector3(-1,0,0),
+              "z+":new THREE.Vector3(0,0,1),"z-":new THREE.Vector3(0,0,-1)};
 function botTurtleStep(b,dt){
   const T=b.turtle;
   b.moveDir=new THREE.Vector3(); b.speed=0; b.aiming=false;
@@ -2761,20 +2808,24 @@ function botTurtleStep(b,dt){
 
   if(T.stage==="walls"){
     if(!botPickMat(b,true)){ T.stage="heal"; return; }
-    let missing=null;
+    let missing=null,missingDir=null;
     for(const dir of ["x+","x-","z+","z-"]){
       const t=wallTargetAt(T.cx,T.cy,T.cz,dir);
-      if(!built.has(t.key)){ missing=t; break; }
+      if(!built.has(t.key)){ missing=t; missingDir=dir; break; }
     }
     b.building=true;
     if(missing){
-      if(b.cool<=0){ if(placePiece(b,missing)){ b.cool=.14; T.keys.push(missing.key); T.fail=0; }
+      // Erst zur Seite drehen, die gerade geschlossen wird, statt blind
+      // rundherum zu bauen ohne hinzuschauen.
+      const aligned=botAimBuild(b,DIRVEC[missingDir],dt);
+      if(aligned&&b.cool<=0){ if(placePiece(b,missing)){ b.cool=.16; T.keys.push(missing.key); T.fail=0; }
                      else { T.fail++; b.cool=.12; if(T.fail>8)T.stage="heal"; } }
     } else T.stage="ceil";
   } else if(T.stage==="ceil"){
     if(!botPickMat(b,true)){ T.stage="heal"; return; }
     const t=floorTargetAt(T.cx,T.cy+1,T.cz);
     b.building=true;
+    b.pitch=lerp(b.pitch,0.78,.15);          // nach oben schauen, wo das Dach hinkommt
     if(built.has(t.key)) T.stage="heal";
     else if(b.cool<=0){ if(placePiece(b,t)){ b.cool=.14; T.keys.push(t.key); T.fail=0; }
                         else { T.fail++; b.cool=.12; if(T.fail>8)T.stage="heal"; } }
@@ -3003,8 +3054,12 @@ function botFlee(b,dt){
     b.sel=0; b.pickT=0.5;
     harvestSwing(b,new THREE.Vector3(tgt.pos.x,tgt.pos.y+1.1,tgt.pos.z));
   }
+  let lookingAtWall=false;
   if(d<26&&botPickMat(b,false)&&b.buildCD<=0){
-    if(botBuildPiece(b,"wall",to))b.buildCD=rnd(.8,1.6); else b.buildCD=rnd(.5,1.0);
+    lookingAtWall=true;                       // erst hinschauen, dann bauen
+    if(botAimBuild(b,to,dt)){
+      if(botBuildPiece(b,"wall",to))b.buildCD=rnd(.8,1.6); else b.buildCD=rnd(.5,1.0);
+    }
   } else b.buildCD-=dt;
   // Richtung nächste Waffe / weg vom Gegner
   const goal=botNearestGun(b);
@@ -3020,7 +3075,7 @@ function botFlee(b,dt){
   }
   b.moveDir=dir;
   b.speed=8.0;
-  b.yaw=angLerp(b.yaw,Math.atan2(-b.moveDir.x,-b.moveDir.z),.16);
+  if(!lookingAtWall)b.yaw=angLerp(b.yaw,Math.atan2(-b.moveDir.x,-b.moveDir.z),.16);
 }
 function botNearestGun(b){
   let best=null,bd=180;
@@ -3043,6 +3098,7 @@ function botFight(b,dt){
   const d=b.pos.distanceTo(tgt.pos);
   const los=hasLOS(b.pos,tgt.pos);
   b.aiming=d>14&&d<120;
+  if(b.coverT>0)b.coverT-=dt;   // Zeitfenster, in dem der Bot hinter der eigenen Deckung bleibt
 
   // Waffe wählen (auch wenn gerade Spitzhacke/Heilung in der Hand liegt)
   if(b.weapSwapT===undefined||b.weapSwapT<=0){
@@ -3080,6 +3136,10 @@ function botFight(b,dt){
   const ideal = w.def.pellets?7:w.def.scope?55:w.def.rng<100?16:26;
   let push=clamp((dist-ideal)/12,-1,1);
   if(dist>maxEngage)push=1;        // ausserhalb der eigenen Reichweite: ran an den Gegner
+  // Direkt nach dem Bauen einer Deckungswand NICHT weiter nach vorn drücken —
+  // sonst rennt der Bot in die eigene, gerade erst gesetzte Wand, bleibt
+  // "stecken" und schlägt sie im nächsten Moment aus Reflex wieder kaputt.
+  if(b.coverT>0)push=Math.min(push,0);
 
   if(b.retreat>0){
     b.moveDir.copy(to).multiplyScalar(-1).addScaledVector(side,.5).normalize();
@@ -3117,13 +3177,13 @@ function botFight(b,dt){
     // wirklich einen Vorteil bringt — genau eine Wand ODER genau eine Rampe
     // pro Entscheidung, nie beides "auf gut Glueck".
     const takingFire = b.hurtT>0.15||w.inMag<=0;          // wird gerade beschossen / leer
-    const needCover  = (takingFire||b.reloading>0||b.hp<55)&&los&&dist>4&&dist<40;
+    const needCover  = (takingFire||b.reloading>0||b.hp<55)&&los&&dist>6&&dist<40;
     const heightGap  = tgt.pos.y-b.pos.y;                 // wie stark liegt der Gegner höher?
     const wantsHigh  = heightGap>1.2 && b.builder>0.35;   // nur bei echtem Rueckstand hochbauen
     let acted=false;
     if(needCover){
       acted=botBuildPiece(b,"wall",to);            // Deckung: konkreter Anlass (Beschuss/Nachladen/wenig HP)
-      if(acted){ b.coverT=1.1; b.buildCD=rnd(1.0,1.9); }
+      if(acted){ b.coverT=1.6; b.buildCD=rnd(1.2,2.2); }
     }
     if(!acted&&wantsHigh){
       acted=botBuildPiece(b,"ramp",to);            // Höhe nur nachholen, nicht grundlos vorpreschen
@@ -3136,10 +3196,17 @@ function botFight(b,dt){
   // Material knapp? Nur farmen, wenn weit weg vom Gegner
   if(botMats(b)<40&&dist>60){ botHarvest(b,dt); }
 
-  // Schießen — nur auf Entfernungen, die zur Waffe passen (siehe maxEngage oben)
-  if(los&&b.reactT<=0&&b.cool<=0&&b.reloading<=0&&dist<maxEngage&&aimErr<0.12+(1-b.skill)*0.2){
+  // Schießen — nur auf Entfernungen, die zur Waffe passen (siehe maxEngage oben).
+  // Sicherung gegen "starrt nur, schießt aber nicht": je länger der Bot schon
+  // Sichtkontakt hat ohne einen Schuss abzugeben, desto grosszügiger wird die
+  // geforderte Zielgenauigkeit — genau wie ein Mensch, der irgendwann auch
+  // ungenau feuert statt ewig nachzuzielen.
+  b.noFireT=los?( (b.noFireT||0)+dt ):0;
+  const fireTol=(0.12+(1-b.skill)*0.2)+clamp((b.noFireT-0.6)*0.12,0,0.35);
+  if(los&&b.reactT<=0&&b.cool<=0&&b.reloading<=0&&dist<maxEngage&&aimErr<fireTol){
     const ap=botAimPoint(b,tgt.pos,dist);
     if(shootWeapon(b,ap)){
+      b.noFireT=0;
       if(w.def.burst){ b.burstLeft=w.def.burst-1; }
       if(!w.def.auto)b.cool+=rnd(.05,.35)*(1.4-b.skill);
       if(Math.random()<0.12*(1-b.skill))b.cool+=rnd(.3,.9);
@@ -4190,10 +4257,10 @@ function drawMapFor(who){
 /* ======================================================================
    ZUSCHAUEN — exakt die Kamera des verfolgten Spielers
    ====================================================================== */
-const spec={i:0,target:null};
-function enterSpectate(){
+const spec={i:0,target:null};function enterSpectate(){
   phase="spectate";
   el("spectate").classList.remove("hidden"); el("specTop").classList.remove("hidden");
+  el("specHud").classList.remove("hidden");
   el("bottom").style.display="none"; el("ammo").style.display="none";
   el("mats").style.display="none"; el("cross").style.display="none";
   el("buildBar").classList.add("hidden"); el("castBar").classList.add("hidden");
@@ -4213,15 +4280,38 @@ function updateSpectate(dt){
   if(!spec.target||!spec.target.alive){ spec.i=Math.min(spec.i,a.length-1); spec.target=a[spec.i]; }
   const t=spec.target;
   const w=heldWeapon(t);
-  el("specTop").innerHTML=t.name+" &nbsp;·&nbsp; "+Math.ceil(t.hp)+" HP"+(t.sh>0?" +"+Math.ceil(t.sh):"")+
-    " &nbsp;·&nbsp; "+t.kills+" Kills<small>"+(w?w.name+" · "+RAR[w.rar].n:"Spitzhacke")+
-    " &nbsp;|&nbsp; Holz "+t.mats.wood+" · Stein "+t.mats.brick+" · Metall "+t.mats.metal+"</small>";
+  el("specTop").innerHTML=t.name+" &nbsp;·&nbsp; "+t.kills+" Kills";
   el("specName").textContent=t.name;
   el("alive").querySelector("strong").textContent=a.length;
   drawMapFor(t);
+
+  // Volles Zuschauer-HUD: HP/Schild, Materialien und das komplette Inventar
+  // des beobachteten Bots — als reine Anzeige, ohne Interaktion.
+  el("specHpFill").style.width=Math.max(0,t.hp)+"%"; el("specHpTxt").textContent=Math.ceil(t.hp);
+  el("specShFill").style.width=Math.max(0,t.sh)+"%"; el("specShTxt").textContent=Math.ceil(t.sh);
+  const mm=el("specMats");
+  if(mm.children.length!==3){ mm.innerHTML="";
+    for(const k of ["wood","brick","metal"]){ const d=document.createElement("div"); d.className="mat"; d.dataset.m=k;
+      d.innerHTML='<b style="color:'+MATCOL[k]+'">'+({wood:"Holz",brick:"Stein",metal:"Metall"})[k]+'</b><span></span>';
+      mm.appendChild(d); } }
+  for(const k of ["wood","brick","metal"]) mm.querySelector('[data-m="'+k+'"] span').textContent=t.mats[k];
+  el("specWeap").innerHTML=w?(w.name+"<small>"+RAR[w.rar].n+" &nbsp;·&nbsp; Magazin "+w.inMag+"/"+w.mag+"</small>")
+                             :("Spitzhacke<small>keine Schusswaffe</small>");
+  const ss=el("specSlots");
+  if(ss.children.length!==6){ ss.innerHTML="";
+    for(let i=0;i<6;i++){ const d=document.createElement("div"); d.className="slot";
+      d.innerHTML='<div class="r"></div><div class="q"></div><div class="n"></div>'; ss.appendChild(d); } }
+  for(let i=0;i<6;i++){
+    const d=ss.children[i], s=t.slots[i];
+    d.classList.toggle("sel",t.sel===i&&!t.build);
+    d.querySelector(".n").textContent=itemLabel(s);
+    d.querySelector(".q").textContent=s&&s.n>1?"x"+s.n:"";
+    d.querySelector(".r").style.background=s&&s.kind==="weapon"?"#"+RAR[s.rar].c.toString(16).padStart(6,"0"):"transparent";
+  }
 }
 function exitSpectateUI(){
   el("spectate").classList.add("hidden"); el("specTop").classList.add("hidden");
+  el("specHud").classList.add("hidden");
   el("bottom").style.display=""; el("ammo").style.display="";
   el("mats").style.display=""; el("cross").style.display="";
 }
