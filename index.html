@@ -2250,13 +2250,13 @@ function updateAmbient(){
 const storm={cx:0,cz:0,r:MAP*0.8,tx:0,tz:0,tr:0,dps:1,phase:0,t:0,state:"wait",mesh:null,tickT:1,tick:false};
 // Original Fortnite-Sturmwerte (Wartezeit / Schrumpfzeit / Schaden pro Sekunde-Tick),
 // siehe die klassische 9-Phasen-Tabelle: 1,1,2,5,8,10,10,10,10 dmg/Tick.
-const PHASES=[{wait:200,move:180,f:.62,dps:1},{wait:120,move:120,f:.58,dps:1},{wait:120,move:90,f:.55,dps:2},
-              {wait:80, move:70, f:.5, dps:5},{wait:70, move:60, f:.45,dps:8},{wait:30, move:60, f:.4, dps:10},
-              {wait:20, move:50, f:.35,dps:10},{wait:15, move:40, f:.2, dps:10},{wait:15, move:40,f:.12,dps:10}];
+const PHASES=[{wait:46,move:46,f:.62,dps:1},{wait:36,move:38,f:.58,dps:2},{wait:30,move:32,f:.55,dps:4},
+              {wait:24,move:26,f:.5, dps:6},{wait:20,move:22,f:.45,dps:8},{wait:17,move:19,f:.4, dps:10},
+              {wait:14,move:16,f:.35,dps:12},{wait:12,move:14,f:.2, dps:14}];
 function initStorm(){
   storm.cx=rnd(-70,70); storm.cz=rnd(-70,70); storm.r=MAP*0.8;
   storm.tx=storm.cx; storm.tz=storm.cz; storm.tr=storm.r;
-  storm.phase=0; storm.t=PHASES[0].wait; storm.state="wait"; storm.dps=1; storm.tickT=1; storm.tick=false;
+  storm.phase=0; storm.t=PHASES[0].wait; storm.state="wait"; storm.dps=0.5; storm.tickT=1; storm.tick=false;
   if(!storm.mesh){
     const g=new THREE.CylinderGeometry(1,1,440,56,1,true);
     storm.mesh=new THREE.Mesh(g,new THREE.MeshBasicMaterial({
