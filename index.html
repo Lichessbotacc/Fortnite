@@ -2667,9 +2667,13 @@ function botAim(b,dt,tgt){
   const to=lead.clone().sub(eye);
   const wantYaw=Math.atan2(-to.x,-to.z);
   const wantPitch=Math.atan2(to.y,Math.hypot(to.x,to.z));
-  const sp=(0.9+b.skill*8.5)*dt;   // schwächere Bots drehen spürbar langsamer, nicht nur ungenauer
-  b.yaw=angLerp(b.yaw,wantYaw,clamp(sp,0,1));
-  b.pitch=clamp(lerp(b.pitch,wantPitch,clamp(sp,0,1)),-1.20,1.15);
+  // Wie ein Analogstick: feste Grad/s-Obergrenze statt linearem Lerp, damit
+  // schnelle Bots nicht "snappen", sondern sichtbar rankurven — wie am Controller.
+  let errYaw=((wantYaw-b.yaw+Math.PI)%6.283+6.283)%6.283-Math.PI;
+  let errPitch=wantPitch-b.pitch;
+  const maxTurn=(2.0+b.skill*7.0)*dt;                 // rad Obergrenze pro Frame, skaliert mit Skill
+  b.yaw+=clamp(errYaw*0.55,-maxTurn,maxTurn);
+  b.pitch=clamp(b.pitch+clamp(errPitch*0.55,-maxTurn*0.6,maxTurn*0.6),-1.20,1.15);
   const err=Math.abs(((wantYaw-b.yaw+Math.PI)%6.283+6.283)%6.283-Math.PI);
   return err;
 }
@@ -2870,17 +2874,21 @@ function botBuildFightStep(b,dt,to){
   // Peek: sobald die Box steht, gelegentlich ein Fenster in die gegnerische
   // Wand editieren, kurz schiessen und wieder schliessen (nur bessere Bots).
   if(S.roofed&&b.skill>0.42){
-    S.peekT=(S.peekT||0)-dt;
+    // Menschliches Peeken: kurz Fenster auf, schauen/schiessen, wieder zu,
+    // dann eine spuerbare Pause — kein staendiges Ein/Aus-Geflacker mehr.
+    S.peekT=(S.peekT||rnd(1.0,2.2))-dt;
     if(S.peekT<=0){
       const cc=cellOf(b.pos.x,b.pos.y,b.pos.z);
       const wd=Math.abs(dir.x)>Math.abs(dir.z)?(dir.x>0?"x+":"x-"):(dir.z>0?"z+":"z-");
       const wt=wallTargetAt(cc.cx,cc.cy,cc.cz,wd);
       const rec=built.get(wt.key);
+      const wasClosed=!rec||!rec.segs||(rec.editState||"full")==="full";
       if(rec&&rec.segs){
-        const open=(rec.editState||"full")!=="full";
-        applyEditState(rec,open?"full":"window");
-        S.peekT=open?rnd(0.9,1.8):rnd(0.5,1.1);
-      } else S.peekT=1.2;
+        applyEditState(rec,wasClosed?"window":"full");
+      }
+      // offen bleiben laenger fuer den Schuss, zu bleiben deutlich laenger
+      // als vorher — das war der Hauptgrund fuers "hektische" Flackern.
+      S.peekT=wasClosed?rnd(0.7,1.1):rnd(1.6,3.2);
     }
   }
 
@@ -3091,35 +3099,38 @@ function botFight(b,dt){
   // Baubattle-Wahrscheinlichkeit haengt direkt an der Bot-Staerke (skill/builder):
   // schwache Bots ("Locker") gehen kaum in echte Baubattles, starke ("Profi") fast immer.
   const battleChance=clamp(b.skill*0.55+b.builder*0.35,0.04,0.95);
+  // Baubattle nur mit nachvollziehbarem Anlass starten (Gegner hoeher / Bot
+  // unter Beschuss) statt staendig auf gut Glueck zu wuerfeln — sonst wirkt
+  // es, als würde der Bot ohne Grund plötzlich lostuermen.
   if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&los&&dist>5&&dist<80&&
      botMats(b)>=BUILD_COST*7&&built.size<BUILD_LIMIT*0.9&&
      ((tgt.pos.y>b.pos.y+1.5&&Math.random()<clamp(battleChance*1.3,0.08,0.98))||
-      (b.hurtT>0&&Math.random()<clamp(battleChance*1.15,0.06,0.97))||
-      Math.random()<battleChance)){
-    // Duell: sofort hochbauen und Höhe erkämpfen
-    b.buildUp={ang:Math.atan2(to.z,to.x)+rnd(-.3,.3),phase:"floor",left:ri(8,16),
+      (b.hurtT>0&&Math.random()<clamp(battleChance*0.9,0.05,0.85)))){
+    // Duell: sofort hochbauen und Höhe erkämpfen — Startwinkel exakt zum
+    // Gegner ausgerichtet, keine zufaellige Verdrehung.
+    b.buildUp={ang:Math.atan2(to.z,to.x),phase:"floor",left:ri(8,16),
                levels:0,fail:0,life:0,climbT:0,y0:b.pos.y,roofed:false};
-    b.buildCD=rnd(1.4,2.8);
+    b.buildCD=rnd(1.6,3.0);
   }
   if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&botPickMat(b,false)){
-    const needCover = b.hurtT>0||b.reloading>0||w.inMag<=0||b.hp<55;
-    const higher   = tgt.pos.y>b.pos.y-1.4*b.builder;   // starke Bots wollen fast immer höher als der Gegner stehen
+    // Klarer Grund fuer jedes Bauteil statt Zufalls-Spam: nur bauen, wenn es
+    // wirklich einen Vorteil bringt — genau eine Wand ODER genau eine Rampe
+    // pro Entscheidung, nie beides "auf gut Glueck".
+    const takingFire = b.hurtT>0.15||w.inMag<=0;          // wird gerade beschossen / leer
+    const needCover  = (takingFire||b.reloading>0||b.hp<55)&&los&&dist>4&&dist<40;
+    const heightGap  = tgt.pos.y-b.pos.y;                 // wie stark liegt der Gegner höher?
+    const wantsHigh  = heightGap>1.2 && b.builder>0.35;   // nur bei echtem Rueckstand hochbauen
     let acted=false;
-    if(needCover&&los&&dist>4){
-      acted=botBuildPiece(b,"wall",to);            // Deckung direkt vor die Nase
-      if(acted){ b.coverT=1.1; b.buildCD=rnd(.7,1.5); }
+    if(needCover){
+      acted=botBuildPiece(b,"wall",to);            // Deckung: konkreter Anlass (Beschuss/Nachladen/wenig HP)
+      if(acted){ b.coverT=1.1; b.buildCD=rnd(1.0,1.9); }
     }
-    if(!acted&&higher&&b.builder>0.35){
-      acted=botBuildPiece(b,"ramp",to);            // Höhe holen
+    if(!acted&&wantsHigh){
+      acted=botBuildPiece(b,"ramp",to);            // Höhe nur nachholen, nicht grundlos vorpreschen
       if(acted&&b.onGround&&b.jumpCD<=0){ b.vel.y=9.4; b.jumpCD=.45; }
-      if(acted)b.buildCD=rnd(.5,1.1);
+      if(acted)b.buildCD=rnd(.7,1.4);
     }
-    if(!acted&&b.builder>0.55&&los&&dist>10&&dist<42&&Math.random()<clamp(0.3+b.skill*0.4,0.2,0.8)){
-      acted=botBuildPiece(b,"ramp",to);            // Push über eine Rampe
-      if(acted&&b.onGround&&b.jumpCD<=0){ b.vel.y=9.4; b.jumpCD=.45; }
-      if(acted)b.buildCD=rnd(.8,1.8);
-    }
-    if(!acted)b.buildCD=rnd(.5,1.4);
+    if(!acted)b.buildCD=rnd(.9,1.9);    // laengere Denkpause statt sofort wieder pruefen
   }
 
   // Material knapp? Nur farmen, wenn weit weg vom Gegner
