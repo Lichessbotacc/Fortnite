@@ -139,6 +139,7 @@ canvas{display:block;touch-action:none}
 #tBuildPieces .tb{position:relative;width:66px;height:58px;border-radius:12px;right:auto;bottom:auto;font-size:15px}
 #tBuildPieces .tb.act{background:rgba(111,208,255,.5);border-color:#fff}
 .slot{cursor:pointer;pointer-events:auto;touch-action:none}
+.slot.dragging{opacity:.45;transform:scale(.94);z-index:5}
 #tAds{width:70px;height:70px;right:214px;bottom:96px;border-radius:50%}
 #tPause{width:46px;height:46px;left:16px;top:16px;font-size:13px;border-radius:50%}
 #tUnstuck{width:60px;height:60px;left:16px;top:72px;font-size:13px;background:rgba(255,90,77,.32);border-radius:50%}
@@ -281,6 +282,7 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
       </label>
     </div>
     <button id="btnStart">Match starten</button>
+    <button id="btnSpectate" class="ghost" style="background:transparent;color:var(--ink);border:1px solid var(--line);margin-left:12px">Nur zuschauen</button>
     <button id="btnEditControls" class="ghost" style="background:transparent;color:var(--ink);border:1px solid var(--line);margin-left:12px">Touch-Steuerung anpassen</button>
     <button id="btnKeybinds" class="ghost" style="background:transparent;color:var(--ink);border:1px solid var(--line);margin-left:12px">Tasten belegen</button>
   </div>
@@ -2533,11 +2535,7 @@ function pickupItem(e,it){
   return true;
 }
 function dropSelected(e){
-  if(e.sel===0)return;
-  const s=e.slots[e.sel]; if(!s)return;
-  spawnFloor(s,e.pos.x+rnd(-1,1),e.pos.z+rnd(-1,1),e.pos.y);
-  e.slots[e.sel]=null;
-  if(e===player)updateHUD();
+  dropAt(e,e.sel);
 }
 /* Bewertung für Bot-Entscheidungen */
 function scoreWeapon(s){
@@ -2842,15 +2840,22 @@ function botBuildFightStep(b,dt,to){
     if(!built.has(t.key))placePiece(b,t);
     b.cool=.09; S.phase="wall";
   } else if(S.phase==="wall"){
-    // Schutzwand seitlich zur Kletterrichtung — NICHT in Blickrichtung "dir" bauen,
-    // sonst mauert sich der Bot genau den Weg zu, den er gleich hochlaufen will.
+    // ECHTE Box: alle vier Seiten der Etage dicht machen, nicht nur die Seite
+    // zum Gegner — das war der Hauptgrund, warum die Baubattles vorher löchrig
+    // und unglaubwürdig wirkten. Reihenfolge: Gegnerseite zuerst (wichtigste Deckung).
     const sideL=new THREE.Vector3(-dir.z,0,dir.x), sideR=new THREE.Vector3(dir.z,0,-dir.x);
-    const wallDir=(to.dot(sideL)>0)?sideL:sideR;   // die dem Gegner zugewandte Seite abdecken
-    if(!botBuildPiece(b,"wall",wallDir))S.fail++;
-    if(botMats(b)>=BUILD_COST*10&&Math.random()<clamp(0.2+b.skill*0.45,0.12,0.85)){
-      botBuildPiece(b,"wall",wallDir.clone().multiplyScalar(-1));
+    const front=(to.dot(sideL)>0)?sideL:sideR;
+    const back=front.clone().multiplyScalar(-1);
+    const dirs=[front,back,new THREE.Vector3(1,0,0),new THREE.Vector3(-1,0,0),
+                new THREE.Vector3(0,0,1),new THREE.Vector3(0,0,-1)]
+      .filter((v,i,arr)=>arr.findIndex(w=>w.distanceTo(v)<0.01)===i); // Duplikate raus
+    let placed=0;
+    for(const wd of dirs){
+      if(botMats(b)<BUILD_COST)break;
+      if(botBuildPiece(b,"wall",wd))placed++;
     }
-    b.cool=.09; S.phase="ramp";
+    if(placed===0)S.fail++; else S.fail=Math.max(0,S.fail-0.5);
+    b.cool=.10; S.phase="ramp";
   } else {
     const ok=botBuildPiece(b,"ramp",dir);
     b.cool=.10;
@@ -2859,6 +2864,23 @@ function botBuildFightStep(b,dt,to){
       S.y0=b.pos.y; S.phase="climb"; S.climbT=0;
     } else {
       S.fail++; S.ang+=Math.PI/2; S.phase="floor";  // blockiert -> 90er und neu ansetzen
+    }
+  }
+
+  // Peek: sobald die Box steht, gelegentlich ein Fenster in die gegnerische
+  // Wand editieren, kurz schiessen und wieder schliessen (nur bessere Bots).
+  if(S.roofed&&b.skill>0.42){
+    S.peekT=(S.peekT||0)-dt;
+    if(S.peekT<=0){
+      const cc=cellOf(b.pos.x,b.pos.y,b.pos.z);
+      const wd=Math.abs(dir.x)>Math.abs(dir.z)?(dir.x>0?"x+":"x-"):(dir.z>0?"z+":"z-");
+      const wt=wallTargetAt(cc.cx,cc.cy,cc.cz,wd);
+      const rec=built.get(wt.key);
+      if(rec&&rec.segs){
+        const open=(rec.editState||"full")!=="full";
+        applyEditState(rec,open?"full":"window");
+        S.peekT=open?rnd(0.9,1.8):rnd(0.5,1.1);
+      } else S.peekT=1.2;
     }
   }
 
@@ -3070,7 +3092,7 @@ function botFight(b,dt){
   // schwache Bots ("Locker") gehen kaum in echte Baubattles, starke ("Profi") fast immer.
   const battleChance=clamp(b.skill*0.55+b.builder*0.35,0.04,0.95);
   if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&los&&dist>5&&dist<80&&
-     botMats(b)>=BUILD_COST*4&&built.size<BUILD_LIMIT*0.9&&
+     botMats(b)>=BUILD_COST*7&&built.size<BUILD_LIMIT*0.9&&
      ((tgt.pos.y>b.pos.y+1.5&&Math.random()<clamp(battleChance*1.3,0.08,0.98))||
       (b.hurtT>0&&Math.random()<clamp(battleChance*1.15,0.06,0.97))||
       Math.random()<battleChance)){
@@ -3081,7 +3103,7 @@ function botFight(b,dt){
   }
   if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&botPickMat(b,false)){
     const needCover = b.hurtT>0||b.reloading>0||w.inMag<=0||b.hp<55;
-    const higher   = tgt.pos.y>b.pos.y+3;
+    const higher   = tgt.pos.y>b.pos.y-1.4*b.builder;   // starke Bots wollen fast immer höher als der Gegner stehen
     let acted=false;
     if(needCover&&los&&dist>4){
       acted=botBuildPiece(b,"wall",to);            // Deckung direkt vor die Nase
@@ -3092,7 +3114,7 @@ function botFight(b,dt){
       if(acted&&b.onGround&&b.jumpCD<=0){ b.vel.y=9.4; b.jumpCD=.45; }
       if(acted)b.buildCD=rnd(.5,1.1);
     }
-    if(!acted&&b.builder>0.55&&los&&dist>10&&dist<42&&Math.random()<0.45){
+    if(!acted&&b.builder>0.55&&los&&dist>10&&dist<42&&Math.random()<clamp(0.3+b.skill*0.4,0.2,0.8)){
       acted=botBuildPiece(b,"ramp",to);            // Push über eine Rampe
       if(acted&&b.onGround&&b.jumpCD<=0){ b.vel.y=9.4; b.jumpCD=.45; }
       if(acted)b.buildCD=rnd(.8,1.8);
@@ -3155,11 +3177,11 @@ function botIdle(b,dt,stormDist){
     if(!b.lootGoal||b.lootT<=0){ b.lootT=1.2; if(!b.lootGoal){b.lootGoal=botNearestGun(b); b.lootGoalT=0;} }
     if(b.lootGoal){
       b.lootGoalT=(b.lootGoalT||0)+dt;
-      if(b.lootGoalT>11){ if(b.lootGoal.loot)b.ignore.add(b.lootGoal.loot); b.lootGoal=null; b.lootGoalT=0; }
+      if(b.lootGoalT>16){ if(b.lootGoal.loot)b.ignore.add(b.lootGoal.loot); b.lootGoal=null; b.lootGoalT=0; }
     }
     if(b.lootGoal){
       const gd=Math.hypot(b.lootGoal.x-b.pos.x,b.lootGoal.z-b.pos.z);
-      if(gd<2.6){ botCollect(b,b.lootGoal); b.lootGoal=null; b.lootGoalT=0; b.lootT=0.15; }
+      if(gd<3.0){ botCollect(b,b.lootGoal); b.lootGoal=null; b.lootGoalT=0; b.lootT=0.15; }
       else {
         const to=new THREE.Vector3(b.lootGoal.x-b.pos.x,0,b.lootGoal.z-b.pos.z).normalize();
         b.moveDir=to; b.speed=7.4;
@@ -3241,19 +3263,32 @@ function botIdle(b,dt,stormDist){
   }
   if(b.lootGoal){
     b.lootGoalT=(b.lootGoalT||0)+dt;
-    if(b.lootGoalT>11){                      // unerreichbar -> aufgeben
+    if(b.lootGoalT>16){                      // unerreichbar -> aufgeben
       if(b.lootGoal.loot)b.ignore.add(b.lootGoal.loot);
       b.lootGoal=null; b.lootGoalT=0; b.lootT=0.6;
     }
   }
   if(b.lootGoal){
     const gd=Math.hypot(b.lootGoal.x-b.pos.x,b.lootGoal.z-b.pos.z);
-    if(gd<2.6){ botCollect(b,b.lootGoal); b.lootGoal=null; b.lootGoalT=0; b.lootT=0.2; }
+    if(gd<3.0){ botCollect(b,b.lootGoal); b.lootGoal=null; b.lootGoalT=0; b.lootT=0.2; }
     else {
       const to=new THREE.Vector3(b.lootGoal.x-b.pos.x,0,b.lootGoal.z-b.pos.z).normalize();
       b.moveDir=to; b.speed=5.8;
       b.yaw=angLerp(b.yaw,Math.atan2(-to.x,-to.z),.12);
       b.pitch=lerp(b.pitch,0,.1);
+      // Kommt der Bot kaum voran (Wand/Treppe im Weg), aktiv durchschlagen bzw.
+      // hochbauen — genau das hat vorher dazu geführt, dass Kisten in Gebäuden
+      // manchmal nie geöffnet wurden.
+      b.lootProgT=(b.lootProgT||0)+dt;
+      if(b.lootProgT>1.3){
+        if(b.lootLastGD===undefined)b.lootLastGD=gd;
+        if(b.lootLastGD-gd<1.0){
+          botBreakThrough(b,to);
+          if(b.onGround&&b.jumpCD<=0){ b.vel.y=9.2; b.jumpCD=.4; }
+          if(botPickMat(b,false))botBuildPiece(b,"ramp",to);
+        }
+        b.lootLastGD=gd; b.lootProgT=0;
+      }
       return;
     }
   }
@@ -3284,14 +3319,23 @@ function botIdle(b,dt,stormDist){
       return;
     }
   }
-  // Rotieren
+  // Rotieren — staerkere Bots bevorzugen dabei erkennbar hoehere Punkte (Huegel/Daecher)
   b.goalT-=dt;
   if(b.goalT<=0){
     b.goalT=rnd(5,11);
-    const a=rnd(0,6.283),d=rnd(0,Math.max(8,storm.r*.65));
-    if(Math.random()<.4){ const poi=pick(POIS); b.goal.set(poi.x+rnd(-18,18),0,poi.z+rnd(-18,18)); }
-    else b.goal.set(storm.cx+Math.cos(a)*d,0,storm.cz+Math.sin(a)*d);
-    if(outside(b.goal.x,b.goal.z,14))b.goal.set(storm.cx+rnd(-20,20),0,storm.cz+rnd(-20,20));
+    const cands=[];
+    for(let k=0;k<4;k++){
+      const a=rnd(0,6.283), d=rnd(0,Math.max(8,storm.r*.65));
+      let gx,gz;
+      if(k===0&&Math.random()<.4){ const poi=pick(POIS); gx=poi.x+rnd(-18,18); gz=poi.z+rnd(-18,18); }
+      else { gx=storm.cx+Math.cos(a)*d; gz=storm.cz+Math.sin(a)*d; }
+      if(outside(gx,gz,14)){ gx=storm.cx+rnd(-20,20); gz=storm.cz+rnd(-20,20); }
+      cands.push({x:gx,z:gz,h:groundAt(gx,gz,260)});
+    }
+    const hiBias=clamp(b.builder*0.7+b.skill*0.3,0.1,0.95);
+    cands.sort((p,q)=>q.h-p.h);
+    const chosen=Math.random()<hiBias?cands[0]:pick(cands);
+    b.goal.set(chosen.x,0,chosen.z);
   }
   const to=new THREE.Vector3(b.goal.x-b.pos.x,0,b.goal.z-b.pos.z);
   if(to.length()<4)b.goalT=0;
@@ -3554,6 +3598,21 @@ let uiT=0, lootAnimT=0;
 const keys={};
 let mouseDown=false, mouseRight=false, firedOnce=false;
 let preview=null, previewParts=null;
+let slotDrag=null;
+function swapSlots(e,i,j){
+  if(i===j||i===0||j===0)return;      // Spitzhacke bleibt fest auf Slot 1
+  const tmp=e.slots[i]; e.slots[i]=e.slots[j]; e.slots[j]=tmp;
+  if(e.sel===i)e.sel=j; else if(e.sel===j)e.sel=i;
+  if(e===player){ sndSwitch(); updateHUD(); }
+}
+function dropAt(e,i){
+  if(i===0)return;                    // Spitzhacke kann nicht weggelegt werden
+  const s=e.slots[i]; if(!s)return;
+  spawnFloor(s,e.pos.x+rnd(-1,1),e.pos.z+rnd(-1,1),e.pos.y);
+  e.slots[i]=null;
+  if(e.sel===i)e.sel=0;
+  if(e===player)updateHUD();
+}
 
 function ensurePreview(){
   if(preview)return;
@@ -3621,6 +3680,25 @@ function interact(){
     pickupItem(player,it); removeLoot(l); sndPickup(); updateHUD();
   }
 }
+/* Munition & Material werden immer im Vorbeilaufen aufgesammelt (wie in Fortnite);
+   Heilitems nur, wenn der gleiche Typ schon im Inventar liegt. Waffen/neue
+   Heilarten bleiben bewusst manuell (E), damit man nicht versehentlich tauscht. */
+let autoPickT=0;
+function updateAutoPickup(dt){
+  if(!player.alive||player.using)return;
+  autoPickT-=dt; if(autoPickT>0)return; autoPickT=0.1;
+  for(let i=lootItems.length-1;i>=0;i--){
+    const l=lootItems[i], it=l.item, p=l.mesh.position;
+    const d=Math.hypot(p.x-player.pos.x,p.z-player.pos.z);
+    if(d>1.35||Math.abs(p.y-player.pos.y-0.35)>1.9)continue;
+    if(it.kind==="ammo"||it.kind==="mats"){
+      pickupItem(player,it); removeLoot(l); sndPickup(); updateHUD();
+    } else if(it.kind==="heal"){
+      const has=player.slots.some(s=>s&&s.kind==="heal"&&s.id===it.id);
+      if(has){ pickupItem(player,it); removeLoot(l); sndPickup(); updateHUD(); }
+    }
+  }
+}
 function primary(){
   if(player.cool>0||player.using)return;
   if(player.build){
@@ -3645,6 +3723,7 @@ function primary(){
 }
 function updatePlay(dt){
   if(!player.alive)return;
+  updateAutoPickup(dt);
   const w=heldWeapon(player);
   player.aiming=mouseRight&&!player.build&&!!w;
   player.building=false;
@@ -3968,8 +4047,33 @@ function updateHUD(){
   if(sl.children.length!==6){ sl.innerHTML="";
     for(let i=0;i<6;i++){const d=document.createElement("div");d.className="slot";
       d.innerHTML='<div class="r"></div><div class="k">'+(i+1)+'</div><div class="q"></div><div class="n"></div>';
-      d.addEventListener("pointerdown",ev=>{ev.preventDefault();if(editMode||!running)return;
-        player.sel=i;player.build=false;player.reloading=0;player.using=null;updateHUD();});
+      d.addEventListener("pointerdown",ev=>{
+        if(editMode||!running)return; ev.preventDefault();
+        slotDrag={i:i,x:ev.clientX,y:ev.clientY,moved:false};
+        try{d.setPointerCapture(ev.pointerId);}catch(err){}
+      });
+      d.addEventListener("pointermove",ev=>{
+        if(!slotDrag||slotDrag.i!==i||slotDrag.i===0)return;
+        if(!slotDrag.moved&&Math.hypot(ev.clientX-slotDrag.x,ev.clientY-slotDrag.y)>10){
+          slotDrag.moved=true; d.classList.add("dragging");
+        }
+      });
+      const endDrag=ev=>{
+        if(!slotDrag||slotDrag.i!==i)return;
+        d.classList.remove("dragging");
+        if(!slotDrag.moved){
+          player.sel=i;player.build=false;player.reloading=0;player.using=null;updateHUD();
+        } else {
+          const target=document.elementFromPoint(ev.clientX,ev.clientY);
+          const targetSlot=target&&target.closest?target.closest(".slot"):null;
+          if(targetSlot&&targetSlot.parentElement===sl){
+            swapSlots(player,i,Array.from(sl.children).indexOf(targetSlot));
+          } else dropAt(player,i);
+        }
+        slotDrag=null;
+      };
+      d.addEventListener("pointerup",endDrag);
+      d.addEventListener("pointercancel",()=>{d.classList.remove("dragging");slotDrag=null;});
       sl.appendChild(d);} }
   for(let i=0;i<6;i++){
     const d=sl.children[i], s=player.slots[i];
@@ -4094,7 +4198,7 @@ function cycleSpec(d){
 }
 function updateSpectate(dt){
   const a=aliveBots();
-  if(a.length<=1){ endMatch(false); return; }
+  if(a.length<=1){ endMatch(false,a[0]); return; }
   if(!spec.target||!spec.target.alive){ spec.i=Math.min(spec.i,a.length-1); spec.target=a[spec.i]; }
   const t=spec.target;
   const w=heldWeapon(t);
@@ -4114,7 +4218,9 @@ function exitSpectateUI(){
 /* ======================================================================
    ABLAUF
    ====================================================================== */
-function startMatch(){
+let SPECTATOR_MODE=false;
+function startMatch(spectate){
+  SPECTATOR_MODE=!!spectate;
   audioInit(); resumeAudio(); stormAmbient();
   el("overlay").classList.add("hidden");
   el("menu").classList.add("hidden");
@@ -4132,13 +4238,22 @@ function startMatch(){
   if(preview&&preview.parent)preview.parent.remove(preview);
   preview=null;
   spawnBots(parseInt(el("optBots").value,10));
-  phase="drop"; dropGlide=false; running=true; paused=false;
   if(TOUCH){ el("touch").classList.remove("hidden");
     setMatButton(); applyTouchLayout(); }
-  updateHUD(); lock();
-  feed("Match gestartet — "+aliveCount()+" Spieler springen ab");
+  running=true; paused=false;
+  if(SPECTATOR_MODE){
+    player.alive=false;
+    if(player.rig)player.rig.root.visible=false;
+    el("touch").classList.add("hidden");
+    enterSpectate();
+    feed("Zuschauer-Modus — "+aliveCount()+" Bots kämpfen um den Sieg");
+  } else {
+    phase="drop"; dropGlide=false;
+    updateHUD(); lock();
+    feed("Match gestartet — "+aliveCount()+" Spieler springen ab");
+  }
 }
-function endMatch(win){
+function endMatch(win,winnerBot){
   running=false; phase="end";
   exitSpectateUI();
   el("touch").classList.add("hidden");
@@ -4148,8 +4263,13 @@ function endMatch(win){
     el("hud").classList.add("hidden");
     el("overlay").classList.remove("hidden");
     el("endCard").classList.remove("hidden");
-    el("endTitle").textContent=win?"#1 VICTORY ROYALE":"Platz "+Math.max(2,place);
-    el("endTitle").className="result"+(win?" win":"");
+    if(SPECTATOR_MODE){
+      el("endTitle").textContent=winnerBot?winnerBot.name+" — VICTORY ROYALE":"Runde beendet";
+      el("endTitle").className="result win";
+    } else {
+      el("endTitle").textContent=win?"#1 VICTORY ROYALE":"Platz "+Math.max(2,place);
+      el("endTitle").className="result"+(win?" win":"");
+    }
     el("endStats").innerHTML="Ausschaltungen <b>"+player.kills+"</b> &nbsp;·&nbsp; Bauteile <b>"+
       built.size+"</b> &nbsp;·&nbsp; Sturmkreis <b>"+(storm.phase+1)+"</b>";
   },win?900:600);
@@ -4240,7 +4360,8 @@ function drawFrame(dt){
 function wireMenu(){
   el("optBots").addEventListener("input",e=>el("optBotsV").textContent=e.target.value);
   if(el("optQual"))el("optQual").addEventListener("change",e=>perfSetMode(e.target.value));
-  el("btnStart").addEventListener("click",()=>{audioInit();resumeAudio();startMatch();});
+  el("btnStart").addEventListener("click",()=>{audioInit();resumeAudio();startMatch(false);});
+  el("btnSpectate").addEventListener("click",()=>{audioInit();resumeAudio();startMatch(true);});
   el("btnAgain").addEventListener("click",startMatch);
   el("btnResume").addEventListener("click",()=>setPaused(false));
   el("btnEditControls").addEventListener("click",enterEditMode);
