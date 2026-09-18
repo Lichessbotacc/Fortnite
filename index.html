@@ -2244,10 +2244,15 @@ function spawnFloor(item,x,z,y){
   beam.position.y=3.2; g.add(beam); g.userData.beam=beam;
   g.position.set(x,(y||0)+0.7,z); staticAdd(g);
   const o={mesh:g,item:item}; lootItems.push(o);
-  if(lootItems.length>620){                     // aeltestes Teil weit weg abraeumen
-    for(let i=0;i<lootItems.length-40;i++){
+  // Aufräumen deutlich verschärft: vorher wuchs die Liste über eine lange
+  // Runde immer weiter an (bis zu 620 Teile), und JEDER Bot scannt sie
+  // mehrmals pro Sekunde komplett durch — das ist der Hauptgrund, warum das
+  // Spiel nach einer Weile immer langsamer wurde und irgendwann hängen blieb.
+  if(lootItems.length>260){
+    let removed=0;
+    for(let i=0;i<lootItems.length&&removed<8;i++){
       const q=lootItems[i].mesh.position;
-      if(Math.hypot(q.x-player.pos.x,q.z-player.pos.z)>120){ removeLoot(lootItems[i]); break; }
+      if(Math.hypot(q.x-player.pos.x,q.z-player.pos.z)>90){ removeLoot(lootItems[i]); i--; removed++; }
     }
   }
   return o;
@@ -2685,7 +2690,10 @@ function shootWeapon(e,aimPt){
   const def=s.def;
   if(e.reloading>0)return false;
   if(s.inMag<=0){ startReload(e); return false; }
-  if(def.spin&&e.spin<def.spin){ e.spin+=0.016; return false; }
+  // Zeitbasiert (GDT = letzte Frame-Zeit) statt fix pro Aufruf hochgezählt —
+  // bei schwankender Framerate kam die Minigun vorher oft nie auf ihre
+  // Anlaufzeit und wirkte, als würde sie gar nicht feuern.
+  if(def.spin&&e.spin<def.spin){ e.spin=Math.min(def.spin,e.spin+GDT); return false; }
   const rig=e.rig;
   let origin=muzzleWorld(rig);
   if(!origin||origin.lengthSq()===0)origin=new THREE.Vector3(e.pos.x,e.pos.y+1.5,e.pos.z);
@@ -4706,10 +4714,11 @@ function endMatch(win,winnerBot){
 /* ======================================================================
    LOOP
    ====================================================================== */
-let botTick=0, frameNo=0;
+let botTick=0, frameNo=0, GDT=0.016;
 function tick(){
   requestAnimationFrame(tick);
   const dt=Math.min(clock.getDelta(),.05);
+  GDT=dt;   // fuer zeitbasierte Effekte wie die Minigun-Anlaufzeit
   perfAdapt(dt);
   _entDirty=true;
   try{ simulate(dt); }
