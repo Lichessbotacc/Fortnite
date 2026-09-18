@@ -3200,7 +3200,7 @@ let buildFighters=0, buildFightT=0;
 function botBuildFightStep(b,dt,to){
   const S=b.buildUp;
   S.life+=dt;
-  if(S.life>26||S.fail>14||S.left<=0||!botPickMat(b,false)||built.size>BUILD_LIMIT*0.97){
+  if(S.life>34||S.fail>20||S.left<=0||!botPickMat(b,false)||built.size>BUILD_LIMIT*0.97){
     b.buildUp=null; b.buildCD=rnd(1.0,2.6); return;
   }
   const dir=new THREE.Vector3(Math.cos(S.ang),0,Math.sin(S.ang));
@@ -3212,14 +3212,23 @@ function botBuildFightStep(b,dt,to){
   // Steigen laeuft unabhaengig vom Bau-Cooldown weiter
   if(S.phase==="climb"){
     S.climbT+=dt;
+    // Abgerutscht/heruntergefallen? Sofort abfangen statt erst nach dem
+    // Timeout zu reagieren — das war der Hauptgrund, warum Bots nach dem
+    // Runterfallen einfach unten stehen blieben statt weiterzubauen.
+    if(b.pos.y<S.y0-1.0){
+      S.fail+=0.5; S.climbT=0; S.phase="floor"; S.y0=b.pos.y;
+      return;
+    }
     if(b.pos.y>=S.y0+G*0.75||Math.floor(b.pos.y/G+0.001)>Math.floor(S.y0/G+0.001)){
       S.left--; S.levels++; S.climbT=0; S.y0=b.pos.y;
       if(S.levels%2===0)S.ang+=Math.PI/2;           // 90er
       S.phase="floor";                              // jede Etage bekommt einen Boden
-    } else if(S.climbT>1.0){
-      if(b.onGround&&b.jumpCD<=0){ b.vel.y=9.8; b.jumpCD=.3; }
-      if(S.climbT>2.4){ S.fail++; S.phase="ramp"; S.climbT=0; }
-    }
+    } else if(S.climbT>0.6&&b.onGround&&b.jumpCD<=0){
+      // Fruehzeitig nachspringen statt erst kurz vorm Timeout — auf der
+      // Rampe nach oben laufen klappt sonst oft schon beim ersten Ansatz nicht.
+      b.vel.y=9.8; b.jumpCD=.3;
+      if(S.climbT>2.0){ S.fail++; S.phase="ramp"; S.climbT=0; }
+    } else if(S.climbT>2.4){ S.fail++; S.phase="ramp"; S.climbT=0; }
     return;
   }
   if(b.cool>0)return;
@@ -3435,6 +3444,12 @@ function botFight(b,dt){
   // (das waere Wallhack) — er schaetzt sie nur ueber die zuletzt gesehene Stelle.
   const d=los?b.pos.distanceTo(tgt.pos):b.pos.distanceTo(b.lastSeen||tgt.pos);
   b.aiming=d>14&&d<120;
+  // Gegner "low" (wenig HP+Schild uebrig): kompromisslos pushen statt zu
+  // zoegern — kein Rueckzug, keine Deckung bauen, einfach ran und fertig machen.
+  const tgtLow = los && (tgt.hp+tgt.sh)<38;
+  const nAlive = aliveCount();
+  const endgame = nAlive<=4;   // letzte(r) Kreis(e): weniger Gegner, klarere Prioritaeten noetig
+  const heightGap = tgt.pos.y-b.pos.y;
   if(b.coverT>0)b.coverT-=dt;   // Zeitfenster, in dem der Bot hinter der eigenen Deckung bleibt
 
   // Waffe wählen (auch wenn gerade Spitzhacke/Heilung in der Hand liegt)
@@ -3456,12 +3471,14 @@ function botFight(b,dt){
                   : longOK ? w.def.rng
                   : Math.min(w.def.rng,62);
 
-  // Heilen nur, wenn wirklich sicher (kein Sichtkontakt, weit weg)
-  if(b.hp<45&&!los&&d>45&&b.retreat<=0){
+  // Heilen nur, wenn wirklich sicher (kein Sichtkontakt, weit weg) — und
+  // niemals, wenn der Gegner gerade "low" ist: dann wird fertiggemacht statt geheilt.
+  if(b.hp<45&&!los&&d>45&&b.retreat<=0&&!tgtLow){
     const hi=botFindHeal(b);
     if(hi>0){ b.sel=hi; if(startUse(b))return; }
     b.retreat=4;
   }
+  if(tgtLow)b.retreat=0;   // kein Zoegern mehr, wenn der Gegner gleich stirbt
   if(w.inMag<=0)startReload(b);
   if(w.inMag<w.mag*0.3&&(!los||d>50)&&b.reloading<=0)startReload(b);
 
@@ -3503,18 +3520,23 @@ function botFight(b,dt){
   let push=clamp((dist-ideal)/12,-1,1);
   if(dist>maxEngage)push=1;        // ausserhalb der eigenen Reichweite: ran an den Gegner
   if(wallHit)push=Math.max(push,boxed?0.75:0.35);  // an die Box heranrücken statt zu zögern
+  if(tgtLow)push=1;                // Gegner ist low: kompromisslos ranpushen, keine Distanz halten
+  // Endgame + klare Hoehen-Ueberlegenheit: oben bleiben und von oben runter
+  // schiessen statt freiwillig wieder runterzuspringen — genau die Situation
+  // "einer oben, einer unten", die vorher niemand richtig gespielt hat.
+  if(endgame&&heightGap<-2.2&&!tgtLow&&los)push=Math.min(push,-0.15);
   // Direkt nach dem Bauen einer Deckungswand NICHT weiter nach vorn drücken —
   // sonst rennt der Bot in die eigene, gerade erst gesetzte Wand, bleibt
   // "stecken" und schlägt sie im nächsten Moment aus Reflex wieder kaputt.
-  if(b.coverT>0&&!wallHit)push=Math.min(push,0);
+  if(b.coverT>0&&!wallHit&&!tgtLow)push=Math.min(push,0);
 
   if(b.retreat>0&&!wallHit){
     b.moveDir.copy(to).multiplyScalar(-1).addScaledVector(side,.5).normalize();
     b.speed=7.4;
   } else {
-    b.moveDir.copy(to).multiplyScalar(push).addScaledVector(side,wallHit?0.25:0.75);
+    b.moveDir.copy(to).multiplyScalar(push).addScaledVector(side,wallHit?0.25:(tgtLow?0.35:0.75));
     if(b.moveDir.lengthSq()>0)b.moveDir.normalize();
-    b.speed=b.aiming?4.4:6.2;
+    b.speed=tgtLow?7.8:(b.aiming?4.4:6.2);
   }
 
   const aimAt=wallHit?new THREE.Vector3(wallHit.x,wallHit.y,wallHit.z)
@@ -3531,9 +3553,10 @@ function botFight(b,dt){
   // Baubattle nur mit nachvollziehbarem Anlass starten (Gegner hoeher / Bot
   // unter Beschuss) statt staendig auf gut Glueck zu wuerfeln — sonst wirkt
   // es, als würde der Bot ohne Grund plötzlich lostuermen.
-  if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&los&&dist>5&&dist<80&&
+  if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&los&&dist>5&&dist<80&&!tgtLow&&
      botMats(b)>=BUILD_COST*7&&built.size<BUILD_LIMIT*0.9&&
-     ((tgt.pos.y>b.pos.y+1.5&&Math.random()<clamp(battleChance*1.3,0.08,0.98))||
+     ((endgame&&heightGap>2.2)||
+      (heightGap>1.5&&Math.random()<clamp(battleChance*1.3,0.08,0.98))||
       (b.hurtT>0&&Math.random()<clamp(battleChance*0.9,0.05,0.85)))){
     // Duell: sofort hochbauen und Höhe erkämpfen — Startwinkel exakt zum
     // Gegner ausgerichtet, keine zufaellige Verdrehung.
@@ -3547,8 +3570,10 @@ function botFight(b,dt){
     // pro Entscheidung, nie beides "auf gut Glueck".
     const takingFire = b.hurtT>0.15||w.inMag<=0;          // wird gerade beschossen / leer
     const needCover  = (takingFire||b.reloading>0||b.hp<55)&&los&&dist>6&&dist<40;
-    const heightGap  = tgt.pos.y-b.pos.y;                 // wie stark liegt der Gegner höher?
-    const wantsHigh  = heightGap>1.2 && b.builder>0.35;   // nur bei echtem Rueckstand hochbauen
+    // Endgame: bei echtem Hoehenunterschied ist "hochbauen" keine Kuer mehr,
+    // sondern Pflicht — sonst schiesst der obere Bot ungestoert von oben rein
+    // und der untere Bot steht ratlos herum, weil er nie reagiert.
+    const wantsHigh  = heightGap>1.2 && (b.builder>0.35 || (endgame&&heightGap>2.2));
     let acted=false;
     if(needCover){
       acted=botBuildPiece(b,"wall",to);            // Deckung: konkreter Anlass (Beschuss/Nachladen/wenig HP)
@@ -3574,7 +3599,7 @@ function botFight(b,dt){
   // geforderte Zielgenauigkeit — genau wie ein Mensch, der irgendwann auch
   // ungenau feuert statt ewig nachzuzielen.
   b.noFireT=los?( (b.noFireT||0)+dt ):0;
-  const fireTol=(0.12+(1-b.skill)*0.2)+clamp((b.noFireT-0.6)*0.12,0,0.35);
+  const fireTol=(0.12+(1-b.skill)*0.2)+clamp((b.noFireT-0.6)*0.12,0,0.35)+(tgtLow?0.15:0);
   if((los||wallHit)&&b.reactT<=0&&b.cool<=0&&b.reloading<=0&&dist<maxEngage&&aimErr<fireTol){
     const ap=wallHit?aimAt:botAimPoint(b,tgt.pos,dist,tgt,w.def.proj==="bullet"?320:0);
     if(shootWeapon(b,ap)){
