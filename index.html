@@ -2576,7 +2576,12 @@ function kill(e,src){
   const killer=src===player?"Du":(src&&src.name?src.name:"Der Sturm");
   feed(killer+" → "+e.name);
   if(src===player){ player.kills++; sndKill(); }
-  else if(src&&src.kills!==undefined){ src.kills++; src.sh=Math.min(100,src.sh+30); src.hp=Math.min(100,src.hp+15); }
+  else if(src&&src.kills!==undefined){ src.kills++; src.sh=Math.min(100,src.sh+30); src.hp=Math.min(100,src.hp+15);
+    // Nach einem Kill zieht es den Bot erstmal zur Leiche, um den Loot
+    // einzusammeln — sonst rennen Bots mit 1-2 Waffen die ganze Runde weiter,
+    // weil sofort der naechste sichtbare Gegner Vorrang bekommt.
+    src.freshLoot={x:from.x,z:from.z}; src.freshLootT=7.5;
+  }
   dropInventory(e);
   if(aliveCount()===1&&player.alive)endMatch(true);
 }
@@ -3313,24 +3318,39 @@ function botFight(b,dt){
   const side=new THREE.Vector3(-to.z,0,to.x).multiplyScalar(b.strafe);
   b.strafeT-=dt; if(b.strafeT<=0){ b.strafe*=-1; b.strafeT=rnd(.7,2.0); }
 
+  // ---- Belagerung: Gegner hat sich eingemauert (keine Sicht, aber nah) ----
+  // Statt aufzugeben, wird die Wand dazwischen gezielt kaputtgeschossen, bis
+  // wieder Sichtkontakt besteht — genau wie ein Mensch gegen eine Box vorgeht.
+  let wallHit=null;
+  const boxed=!!tgt.turtle;
+  if(!los&&dist<50&&dist>2.5){
+    const ex=tgt.pos.x-b.pos.x, ey=(tgt.pos.y+1.1)-(b.pos.y+1.5), ez=tgt.pos.z-b.pos.z;
+    const elen=Math.hypot(ex,ey,ez);
+    if(elen>0.1){
+      const h=rayHit(b.pos.x,b.pos.y+1.5,b.pos.z,ex/elen,ey/elen,ez/elen,elen-0.35);
+      if(h&&h.col&&h.col.buildRec)wallHit=h;
+    }
+  }
+
   const ideal = w.def.pellets?7:w.def.scope?55:w.def.rng<100?16:26;
   let push=clamp((dist-ideal)/12,-1,1);
   if(dist>maxEngage)push=1;        // ausserhalb der eigenen Reichweite: ran an den Gegner
+  if(wallHit)push=Math.max(push,boxed?0.75:0.35);  // an die Box heranrücken statt zu zögern
   // Direkt nach dem Bauen einer Deckungswand NICHT weiter nach vorn drücken —
   // sonst rennt der Bot in die eigene, gerade erst gesetzte Wand, bleibt
   // "stecken" und schlägt sie im nächsten Moment aus Reflex wieder kaputt.
-  if(b.coverT>0)push=Math.min(push,0);
+  if(b.coverT>0&&!wallHit)push=Math.min(push,0);
 
-  if(b.retreat>0){
+  if(b.retreat>0&&!wallHit){
     b.moveDir.copy(to).multiplyScalar(-1).addScaledVector(side,.5).normalize();
     b.speed=7.4;
   } else {
-    b.moveDir.copy(to).multiplyScalar(push).addScaledVector(side,0.75);
+    b.moveDir.copy(to).multiplyScalar(push).addScaledVector(side,wallHit?0.25:0.75);
     if(b.moveDir.lengthSq()>0)b.moveDir.normalize();
     b.speed=b.aiming?4.4:6.2;
   }
 
-  const aimAt=new THREE.Vector3(tgt.pos.x,tgt.pos.y+1.1,tgt.pos.z);
+  const aimAt=wallHit?new THREE.Vector3(wallHit.x,wallHit.y,wallHit.z):new THREE.Vector3(tgt.pos.x,tgt.pos.y+1.1,tgt.pos.z);
   const aimErr=botAim(b,dt,aimAt);
 
   /* ---- Baubattle ---- */
@@ -3383,8 +3403,8 @@ function botFight(b,dt){
   // ungenau feuert statt ewig nachzuzielen.
   b.noFireT=los?( (b.noFireT||0)+dt ):0;
   const fireTol=(0.12+(1-b.skill)*0.2)+clamp((b.noFireT-0.6)*0.12,0,0.35);
-  if(los&&b.reactT<=0&&b.cool<=0&&b.reloading<=0&&dist<maxEngage&&aimErr<fireTol){
-    const ap=botAimPoint(b,tgt.pos,dist);
+  if((los||wallHit)&&b.reactT<=0&&b.cool<=0&&b.reloading<=0&&dist<maxEngage&&aimErr<fireTol){
+    const ap=wallHit?aimAt:botAimPoint(b,tgt.pos,dist);
     if(shootWeapon(b,ap)){
       b.noFireT=0;
       if(w.def.burst){ b.burstLeft=w.def.burst-1; }
