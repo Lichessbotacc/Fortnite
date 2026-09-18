@@ -542,18 +542,19 @@ const PERF={
   botFar:105,           // Bots weiter weg -> KI laeuft langsamer
   botHide:300,          // Bots weiter weg -> gar nicht zeichnen
   lodStep:0.12,         // KI-Schritt fuer weit entfernte Bots
-  fxMax:70, fxDist:130
+  fxMax:70, fxDist:130, lootCap:260
 };
 function perfApply(){
   const L=PERF.level;
   LOWFX = (L===0);
   PERF.base = Math.min(devicePixelRatio, L>=2?1.75:L===1?1.25:1.0);
-  PERF.renderDist = L>=2?480:L===1?340:240;
-  PERF.botFar     = L>=2?170:L===1?130:90;      // erst später auf Denk-Throttle umschalten, damit Sniping auf Distanz nicht ruckelt
+  PERF.renderDist = L>=2?480:L===1?340:220;
+  PERF.botFar     = L>=2?170:L===1?130:65;      // erst später auf Denk-Throttle umschalten, damit Sniping auf Distanz nicht ruckelt
   PERF.botHide    = PERF.renderDist*0.85;
-  PERF.lodStep    = L>=2?0.06:L===1?0.10:0.16;  // kürzeres Intervall zwischen Positions-Updates bei weit entfernten Bots
-  PERF.fxMax      = L>=2?80:L===1?45:22;
-  PERF.fxDist     = L>=2?140:L===1?95:60;
+  PERF.lodStep    = L>=2?0.06:L===1?0.10:0.26;  // kürzeres Intervall zwischen Positions-Updates bei weit entfernten Bots
+  PERF.fxMax      = L>=2?80:L===1?45:16;
+  PERF.fxDist     = L>=2?140:L===1?95:50;
+  PERF.lootCap    = L>=2?260:L===1?200:130;
   PERF.targetMs   = 22;
   if(renderer)renderer.setPixelRatio(PERF.base*PERF.scale);
   if(scene&&scene.fog)scene.fog.density = 1.05/PERF.renderDist;
@@ -2248,7 +2249,7 @@ function spawnFloor(item,x,z,y){
   // Runde immer weiter an (bis zu 620 Teile), und JEDER Bot scannt sie
   // mehrmals pro Sekunde komplett durch — das ist der Hauptgrund, warum das
   // Spiel nach einer Weile immer langsamer wurde und irgendwann hängen blieb.
-  if(lootItems.length>260){
+  if(lootItems.length>PERF.lootCap){
     let removed=0;
     for(let i=0;i<lootItems.length&&removed<8;i++){
       const q=lootItems[i].mesh.position;
@@ -4756,7 +4757,10 @@ function simulate(dt){
        Das ist der groesste Gewinn bei vielen Gegnern. */
     const cpos=camera?camera.position:null;
     const near2=PERF.botFar*PERF.botFar, hide2=PERF.botHide*PERF.botHide;
-    const stride = bots.length>60?3 : bots.length>28?2 : 1;
+    // Auf "Niedrig" zusätzlich viel gröber staffeln — das ist der Hauptregler
+    // gegen Haenger bei vielen Bots auf schwaechster Einstellung.
+    const strideBase = bots.length>60?3 : bots.length>28?2 : 1;
+    const stride = PERF.level===0?strideBase*2 : PERF.level===1?strideBase : strideBase;
     frameNo++; const slot=frameNo%stride;
     for(let i=0;i<bots.length;i++){
       const b=bots[i]; if(!b.alive)continue;
@@ -4778,6 +4782,7 @@ function simulate(dt){
   }
 }
 function updateSunShadow(){
+  if(LOWFX)return;   // auf "Niedrig" gibt's ohnehin keine Schatten -> Berechnung komplett sparen
   if(!sunLight||!camera)return;
   // Die Schattenkamera haengt am Spieler, nicht an der Weltmitte — sonst
   // waere die Aufloesung auf der riesigen Karte viel zu grob.
