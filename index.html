@@ -1724,6 +1724,26 @@ function hasSupport(t){
   for(let i=0;i<cand.length;i++) if(built.has(cand[i]))return true;
   return false;
 }
+const MATNAME={wood:"Holz",brick:"Stein",metal:"Metall"};
+/* Automatischer Material-Wechsel: hat man z.B. kein Holz mehr, springt die
+   Auswahl selbstständig auf die nächste Material-Art mit genug Vorrat um —
+   wie bei den Bots, nur zusätzlich mit Hinweis im Feed für den Spieler. */
+function ensureBuildMat(e){
+  if(e.mats[e.matSel]>=BUILD_COST)return true;
+  const order=["wood","brick","metal"];
+  const from=e.matSel;
+  for(const m of order){
+    if(e.mats[m]>=BUILD_COST){
+      e.matSel=m;
+      if(e===player){
+        if(typeof setMatButton==="function")setMatButton();
+        feed("Kein "+MATNAME[from]+" mehr — wechsle zu "+MATNAME[m]);
+      }
+      return true;
+    }
+  }
+  return false;
+}
 function canBuild(e,t){
   if(built.has(t.key))return false;
   if(e.mats[e.matSel]<BUILD_COST)return false;
@@ -1776,6 +1796,7 @@ function placePiece(e,t,silent){
     }
   }
   e.mats[mt]-=BUILD_COST;
+  e.pieceShown=t.type; e.pieceShownT=0.9;
   const rec={grp:grp,cols:cols,type:t.type,mat:mt,key:t.key,hp:hp,maxhp:hp,owner:e,segs:wallSegs,editState:"full"};
   cols.forEach(c=>{c.buildRec=rec;});
   built.set(t.key,rec);
@@ -2432,7 +2453,8 @@ function spawnBots(n){
       ignore:new Set(), harvestBad:new Set(), badClearT:rnd(20,40),
       anchor:null, anchorT:0, forceT:0, forceDir:new THREE.Vector3(), idleMoveT:0,
       pickT:0, grabT:rnd(0,.45), grabI:ri(0,200),
-      lodAcc:rnd(0,.25), lodSkip:false, targetDist:1e9
+      lodAcc:rnd(0,.25), lodSkip:false, targetDist:1e9,
+      pieceShown:"wall", pieceShownT:0
     };
     // Kein Startgewehr: jeder Bot geht zuerst auf Waffensuche (wie im echten Match)
     bots.push(b);
@@ -2677,7 +2699,8 @@ function damage(e,amount,src,head){
   if(e===player){
     player.lastDmgBy=src; flashDamage(); sndDamageTaken(head);
   } else {
-    if(src===player){ hitMark(head); dmgNumber(new THREE.Vector3(e.pos.x,e.pos.y+1.9,e.pos.z),amount,head,shieldHit&&!head);
+    if(src===player||(phase==="spectate"&&src&&src===spec.target)){
+      hitMark(head); dmgNumber(new THREE.Vector3(e.pos.x,e.pos.y+1.9,e.pos.z),amount,head,shieldHit&&!head);
       sndHit(head); if(e.sh<=0&&shieldHit)sndShieldBreak(); }
     if(src){ e.lastSeen=src.pos.clone(); e.seenT=5; e.panic=1.2; e.hurtT=2.2; e.buildCD=0;
              if(!e.target)e.target=src; }
@@ -3300,6 +3323,7 @@ function botBuildFightStep(b,dt,to){
 function updateBot(b,dt){
   if(b.state==="drop"){ botDrop(b,dt); return; }
   b.building=false;
+  if(b.pieceShownT>0)b.pieceShownT-=dt;
   b.moveDir=new THREE.Vector3(); b.speed=5.2;
   if(b.seenT>0)b.seenT-=dt;
   if(b.panic>0)b.panic-=dt;
@@ -4202,6 +4226,7 @@ function updateAutoPickup(dt){
 function primary(){
   if(player.cool>0||player.using)return;
   if(player.build){
+    ensureBuildMat(player);
     const t=buildTargetFor(player);
     if(placePiece(player,t)){ player.cool=.16; player.building=true; }
     else player.cool=.12;
@@ -4741,6 +4766,34 @@ function updateSpectate(dt){
   if(!spec.target||!spec.target.alive){ spec.i=Math.min(spec.i,a.length-1); spec.target=a[spec.i]; }
   const t=spec.target;
   const w=heldWeapon(t);
+
+  // Zielfernrohr: genau wie beim Spieler zoomt die Kamera rein und die
+  // Scope-Blende legt sich übers Bild, sobald der beobachtete Bot mit einer
+  // Scope-Waffe zielt.
+  const scoped=t.aiming&&w&&w.def.scope;
+  const targetFov=t.aiming?(scoped?24:62):75;
+  camera.fov=lerp(camera.fov,targetFov,1-Math.pow(.002,dt));
+  camera.updateProjectionMatrix();
+  if(scoped){
+    el("scopeOv").classList.add("on");
+    el("scopeOv").style.setProperty("--scopeR",(w.def.id==="bolt"||w.def.id==="semisniper"?"200px":"260px"));
+  } else {
+    el("scopeOv").classList.remove("on");
+  }
+
+  // Bauteil-Anzeige: zeigt kurz an, welches Teil der Bot gerade gesetzt hat —
+  // genau die Leiste, die auch der Spieler beim eigenen Bauen sieht.
+  const bb=el("buildBar");
+  if(t.pieceShownT>0){
+    bb.classList.remove("hidden");
+    if(bb.children.length!==4){ bb.innerHTML="";
+      for(const pn of PIECES){ const d=document.createElement("div"); d.dataset.p=pn;
+        d.textContent=({wall:"Wand",floor:"Boden",ramp:"Rampe",roof:"Dach"})[pn]; bb.appendChild(d); } }
+    Array.from(bb.children).forEach(d=>d.classList.toggle("sel",d.dataset.p===t.pieceShown));
+  } else {
+    bb.classList.add("hidden");
+  }
+
   el("specTop").innerHTML=t.name+" &nbsp;·&nbsp; "+t.kills+" Kills";
   el("specName").textContent=t.name;
   el("alive").querySelector("strong").textContent=a.length;
@@ -4775,6 +4828,8 @@ function exitSpectateUI(){
   el("specHud").classList.add("hidden");
   el("bottom").style.display=""; el("ammo").style.display="";
   el("mats").style.display=""; el("cross").style.display="";
+  el("scopeOv").classList.remove("on"); el("buildBar").classList.add("hidden");
+  camera.fov=75; camera.updateProjectionMatrix();
 }
 
 /* ======================================================================
