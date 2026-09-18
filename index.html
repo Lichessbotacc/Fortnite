@@ -1751,45 +1751,46 @@ function sndGun(def,vol,far){
   const silent=!!def.silent;
   const hi=far?0.45:1;     // aus der Ferne dumpfer
   if(silent){
-    noiseHit(.05,.22*vol,"bandpass",700,1.5,.2);
-    tone(150,60,.09,"sine",.20*vol);
+    noiseHit(.045,.24*vol,"bandpass",900,2,.15);
+    tone(160,55,.09,"sine",.22*vol);
     return;
   }
-  if(def.pellets){                     // Schrotflinten
-    tone(140,45,.20,"sine",.55*vol,0,.4);
-    noiseHit(.10,.55*vol*hi,"bandpass",900,.8,.5);
-    noiseHit(.45,.22*vol,"lowpass",1100,1,.9,.05);
+  if(def.pellets){                     // Schrotflinten — breiter, satter Knall
+    noiseHit(.025,.9*vol*hi,"highpass",2200,.6,.25);     // Crack
+    tone(130,42,.22,"sine",.6*vol,0,.4);                 // Body
+    noiseHit(.12,.6*vol*hi,"bandpass",850,.8,.5);
+    noiseHit(.5,.24*vol,"lowpass",1000,1,.9,.05);         // Tail
     return;
   }
   if(id==="bolt"||id==="hunting"||id==="crossbow"){
-    if(id==="crossbow"){ noiseHit(.05,.3*vol,"bandpass",2200,3,.2); tone(420,120,.10,"triangle",.18*vol); return; }
-    noiseHit(.05,.85*vol*hi,"highpass",2600,.7,.4);     // Peitschenknall
-    tone(190,55,.28,"sine",.55*vol,0,.4);
-    noiseHit(.85,.26*vol,"lowpass",800,1,1.0,.04);      // langer Nachhall
+    if(id==="crossbow"){ noiseHit(.045,.32*vol,"bandpass",2200,3,.2); tone(430,110,.10,"triangle",.20*vol); return; }
+    noiseHit(.03,1.0*vol*hi,"highpass",3000,.6,.4);      // scharfer Peitschenknall
+    tone(190,50,.30,"sine",.6*vol,0,.4);
+    noiseHit(.9,.28*vol,"lowpass",750,1,1.0,.04);         // langer Nachhall/Echo
     return;
   }
   if(def.proj){
-    noiseHit(.20,.55*vol,"lowpass",600,1,.7);
-    tone(120,40,.35,"sawtooth",.35*vol,0,.5);
+    noiseHit(.22,.6*vol,"lowpass",550,1,.7);
+    tone(115,38,.38,"sawtooth",.4*vol,0,.5);
     return;
   }
   if(id==="minigun"){
-    noiseHit(.035,.30*vol*hi,"bandpass",1700,1.2,.18);
-    tone(210,110,.05,"square",.16*vol);
+    noiseHit(.03,.34*vol*hi,"bandpass",1800,1.2,.18);
+    tone(220,110,.05,"square",.18*vol);
     return;
   }
-  // Pistolen / SMG / AR
-  const body=id==="smg"||id==="dual"?260:id==="pistol"||id==="supppistol"?300:230;
-  noiseHit(.045,.55*vol*hi,"highpass",1900,.8,.28);
-  tone(body,80,.11,"triangle",.34*vol,0,.25);
-  noiseHit(.30,.13*vol,"lowpass",1200,1,.6,.03);
+  // Pistolen / SMG / AR — knackiger Transient + Körper + kurzer Tail
+  const body=id==="smg"||id==="dual"?255:id==="pistol"||id==="supppistol"?295:225;
+  noiseHit(.028,.65*vol*hi,"highpass",2400,.7,.3);        // Crack (Attack)
+  tone(body,75,.10,"triangle",.36*vol,0,.25);             // Body
+  noiseHit(.24,.15*vol,"lowpass",1100,1,.55,.02);         // kurzer Nachhall
 }
 function sndHit(head){
   if(!audioInit())return;
-  if(head){ tone(1500,900,.09,"square",.20); tone(2400,1600,.06,"triangle",.12,.02); }
-  else tone(1100,700,.05,"square",.14);
+  if(head){ tone(1600,950,.09,"square",.22); tone(2500,1650,.07,"triangle",.13,.02); noiseHit(.05,.10,"highpass",3500,1,0); }
+  else tone(1100,700,.05,"square",.15);
 }
-function sndShieldBreak(){ tone(900,300,.25,"sawtooth",.18); noiseHit(.25,.2,"bandpass",2600,2,.4); }
+function sndShieldBreak(){ tone(950,300,.26,"sawtooth",.19); noiseHit(.26,.2,"bandpass",2600,2,.4); }
 function sndKill(){
   [0,.09,.18].forEach((d,i)=>tone([660,880,1320][i],[660,880,1320][i],.14,"triangle",.17,d,.5));
   noiseHit(.3,.12,"highpass",3000,1,.5,.18);
@@ -1806,7 +1807,7 @@ function sndChestAt(pos){
   const notes=[784,988,1175,1568,1976];
   notes.forEach((f,i)=>{ tone(f,f,.30,"sine",.13*v,i*.055,.4); tone(f*2,f*2,.14,"triangle",.045*v,i*.055+.01,.3); });
 }
-function sndPickup(){ tone(880,1320,.09,"triangle",.14); tone(1320,1760,.07,"triangle",.08,.05); }
+function sndPickup(){ noiseHit(.02,.06,"highpass",3000,1,0); tone(900,1400,.09,"triangle",.15); tone(1400,1900,.07,"triangle",.09,.05); }
 function sndBuild(mt,vol){
   const v=vol===undefined?1:vol;
   if(mt==="wood"){ tone(210,90,.12,"triangle",.22*v); noiseHit(.09,.18*v,"bandpass",900,1,.3); }
@@ -1817,13 +1818,37 @@ function sndHarvest(mt){
   if(mt==="wood"){ noiseHit(.09,.26,"bandpass",800,1.5,.25); tone(240,110,.08,"triangle",.14); }
   else { noiseHit(.07,.28,"highpass",3200,1.2,.3); tone(520,260,.06,"square",.10); }
 }
-function sndReloadStart(){ tone(320,180,.06,"square",.12); noiseHit(.05,.12,"bandpass",1200,2,.1,.10); }
-function sndReloadEnd(){ noiseHit(.05,.18,"bandpass",1600,2,.15); tone(420,220,.07,"square",.13,.05); }
-function sndHeal(){ [523,659,784].forEach((f,i)=>tone(f,f,.22,"sine",.13,i*.08,.5)); }
-function sndStep(hard){
-  noiseHit(.07,hard?.10:.055,"lowpass",hard?520:380,1,.08);
+function sndReloadStart(){ noiseHit(.05,.14,"bandpass",1200,2,.1,.10); tone(340,190,.06,"square",.13); }
+function sndReloadEnd(){ noiseHit(.045,.20,"bandpass",1700,2.5,.15); tone(440,240,.08,"square",.14,.05); noiseHit(.03,.10,"highpass",2800,1,.02); }
+/* Heilung: je nach Item ein eigener, klar unterscheidbarer Jingle */
+function sndHeal(id){
+  if(id==="bandage"){                              // "wickeln" — 3 kurze rhythmische Impulse
+    for(let i=0;i<3;i++) noiseHit(.06,.09,"bandpass",1600,2,.1,i*.22);
+    tone(500,500,.10,"triangle",.06,.0);
+  } else if(id==="shield"||id==="mini"){            // "glucksen" — blubbernde aufsteigende Töne
+    [700,900,1150,900].forEach((f,i)=>tone(f,f*1.15,.10,"sine",.11,i*.08,.4));
+  } else if(id==="chug"){                           // großer Fanfaren-Jingle
+    [392,523,659,784,1047].forEach((f,i)=>tone(f,f,.30,"triangle",.15,i*.07,.6));
+  } else {                                          // Verbandskasten / Schlürf-Saft: satter Doppelklang
+    [523,659,880].forEach((f,i)=>tone(f,f,.22,"sine",.13,i*.08,.5));
+  }
 }
-function sndLand(v){ noiseHit(.16,clamp(v/26,.08,.3),"lowpass",300,1,.25); tone(90,45,.16,"sine",.18); }
+/* Schritte: materialabhängig etwas verschieden, 3D-Lautstärke für alle außer
+   den eigenen. Fortnite-typisch: dumpfer Tritt + leises Klack-Obertongeräusch. */
+function sndStep(hard){
+  noiseHit(.06,hard?.11:.06,"lowpass",hard?560:400,1,.08);
+  noiseHit(.03,hard?.05:.03,"bandpass",1800,1.5,.04);
+}
+function sndStepAt(pos,hard){
+  const v=distVol(pos,42); if(v<=.03)return;         // Schritte sind nur in der Nähe hörbar
+  noiseHit(.06,(hard?.11:.06)*v,"lowpass",hard?560:400,1,.10);
+  noiseHit(.03,(hard?.05:.03)*v,"bandpass",1800,1.5,.05);
+}
+function sndLand(v){ noiseHit(.05,clamp(v/22,.06,.22),"highpass",1600,1,0); noiseHit(.18,clamp(v/26,.09,.32),"lowpass",280,1,.25); tone(85,42,.17,"sine",.19); }
+function sndLandAt(pos,v){
+  const vv=distVol(pos,55); if(vv<=.03)return;
+  noiseHit(.18,clamp(v/26,.08,.28)*vv,"lowpass",280,1,.2);
+}
 function sndJump(){ noiseHit(.05,.05,"lowpass",600,1,0); }
 function sndExplodeAt(pos){
   const v=distVol(pos,190); if(v<.01)return;
@@ -1839,7 +1864,7 @@ function sndZoneClose(){        // Sturm beginnt zu schließen — dringliche Si
 function sndZoneStable(){       // neuer Sturmkreis steht — ruhiger, kurzer Doppelklang
   tone(392,392,.30,"triangle",.13,0,.5); tone(523,523,.34,"triangle",.13,.10,.5);
 }
-function sndSwitch(){ noiseHit(.04,.10,"bandpass",2000,2,.05); }
+function sndSwitch(){ noiseHit(.035,.09,"bandpass",2200,2,.04); tone(700,500,.03,"square",.05); }
 function sndDamageTaken(head){ tone(head?260:200,90,.12,"square",.16); noiseHit(.10,.12,"lowpass",800,1,.2); }
 /* Sturm-Ambiente */
 function stormAmbient(){
@@ -2418,7 +2443,7 @@ function finishUse(e){
   else if(d.tgt==="both"){e.hp=Math.min(100,e.hp+d.heal);e.sh=Math.min(100,e.sh+d.heal);}
   else {e.hp=100;e.sh=100;}
   consume(e,s);
-  if(e===player)sndHeal();
+  if(e===player)sndHeal(s.id);
 }
 function consume(e,s){
   s.n--; if(s.n<=0){ const i=e.slots.indexOf(s); if(i>=0)e.slots[i]=null; }
@@ -2610,14 +2635,18 @@ function botAimPoint(b,tgt,dist){
     tgt.z+rnd(-jitter,jitter));
 }
 function botBuildPiece(b,type,dirVec){
-  const save=b.piece;
-  // Bot muss erst dahin gucken, wo gebaut wird - Blickrichtung bleibt danach stehen
-  // statt sich unsichtbar sofort wieder zurückzudrehen.
-  if(dirVec&&dirVec.lengthSq()>0.001)b.yaw=angLerp(b.yaw,Math.atan2(-dirVec.x,-dirVec.z),.5);
+  const save=b.piece, savedYaw=b.yaw;
+  // Platzierung IMMER exakt in dirVec berechnen (nie mit der nur langsam
+  // nachziehenden Sicht-Yaw!) — sonst landet z.B. eine Rampe in der falschen
+  // Zelle und der Bot läuft beim Klettern daneben vorbei ins Leere.
+  if(dirVec&&dirVec.lengthSq()>0.001)b.yaw=Math.atan2(-dirVec.x,-dirVec.z);
   b.piece=type;
   const t=buildTargetFor(b);
   const ok=placePiece(b,t);
   b.piece=save;
+  // Sichtbar bleibt der Bot danach in Richtung des Bauziels gedreht (nicht
+  // zurückspringen), nur die Berechnung selbst war das Problem.
+  if(!dirVec||dirVec.lengthSq()<=0.001)b.yaw=savedYaw;
   if(ok)b.building=true;
   return ok;
 }
@@ -2738,7 +2767,7 @@ function botBuildFightStep(b,dt,to){
     b.buildUp=null; b.buildCD=rnd(1.0,2.6); return;
   }
   const dir=new THREE.Vector3(Math.cos(S.ang),0,Math.sin(S.ang));
-  b.moveDir.copy(dir); b.speed=6.0;                 // die eigene Rampe hochlaufen
+  b.moveDir.copy(dir); b.speed=6.6;                 // die eigene Rampe hochlaufen
   b.yaw=angLerp(b.yaw,Math.atan2(-to.x,-to.z),.14); // Blick bleibt beim Gegner
   b.building=true;
 
@@ -2749,9 +2778,9 @@ function botBuildFightStep(b,dt,to){
       S.left--; S.levels++; S.climbT=0; S.y0=b.pos.y;
       if(S.levels%2===0)S.ang+=Math.PI/2;           // 90er
       S.phase="floor";                              // jede Etage bekommt einen Boden
-    } else if(S.climbT>1.6){
-      if(b.onGround&&b.jumpCD<=0){ b.vel.y=9.6; b.jumpCD=.35; }
-      if(S.climbT>3.0){ S.fail++; S.phase="ramp"; S.climbT=0; }
+    } else if(S.climbT>1.0){
+      if(b.onGround&&b.jumpCD<=0){ b.vel.y=9.8; b.jumpCD=.3; }
+      if(S.climbT>2.4){ S.fail++; S.phase="ramp"; S.climbT=0; }
     }
     return;
   }
@@ -2764,10 +2793,13 @@ function botBuildFightStep(b,dt,to){
     if(!built.has(t.key))placePiece(b,t);
     b.cool=.09; S.phase="wall";
   } else if(S.phase==="wall"){
-    // Schutzwand Richtung Gegner, bei genug Material zusaetzlich eine seitlich
-    if(!botBuildPiece(b,"wall",to))S.fail++;
+    // Schutzwand seitlich zur Kletterrichtung — NICHT in Blickrichtung "dir" bauen,
+    // sonst mauert sich der Bot genau den Weg zu, den er gleich hochlaufen will.
+    const sideL=new THREE.Vector3(-dir.z,0,dir.x), sideR=new THREE.Vector3(dir.z,0,-dir.x);
+    const wallDir=(to.dot(sideL)>0)?sideL:sideR;   // die dem Gegner zugewandte Seite abdecken
+    if(!botBuildPiece(b,"wall",wallDir))S.fail++;
     if(botMats(b)>=BUILD_COST*10&&Math.random()<0.6){
-      botBuildPiece(b,"wall",new THREE.Vector3(-to.z,0,to.x));
+      botBuildPiece(b,"wall",wallDir.clone().multiplyScalar(-1));
     }
     b.cool=.09; S.phase="ramp";
   } else {
@@ -3340,8 +3372,15 @@ function finishBotFrame(b,dt){
   }
   if(!b.turtle&&!b.buildUp)botAvoid(b,dt);   // beim Hochbauen nicht ausweichen
   b.vel.x=b.moveDir.x*b.speed; b.vel.z=b.moveDir.z*b.speed;
+  const wasAirB=!b.onGround;
   moveEntity(b,dt,PR,PH);
   depenetrate(b,PR,PH);
+  if(wasAirB&&b.onGround)sndLandAt(b.pos,10);
+  const hspB=Math.hypot(b.vel.x,b.vel.z);
+  if(b.onGround&&hspB>0.6){
+    b.stepAcc=(b.stepAcc||0)+hspB*dt;
+    if(b.stepAcc>1.9){ b.stepAcc=0; sndStepAt(b.pos,b.speed>7); }
+  } else b.stepAcc=1.4;
   const moved=Math.hypot(b.pos.x-before.x,b.pos.z-before.z);   // nur horizontal zählt
   if(moved<b.speed*dt*0.35&&b.speed>1){ b.stuck+=dt; } else b.stuck=Math.max(0,b.stuck-dt*2);
 
