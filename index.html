@@ -972,9 +972,22 @@ function buildWorld(){
     const x=rnd(-HALF+40,HALF-40), z=rnd(-HALF+40,HALF-40);
     if(spots.some(sp=>Math.hypot(sp.x-x,sp.y-z)<55))continue;
     const n=ri(1,3);
+    const placed=[];   // {x,z,r} bereits gesetzter Häuser in diesem Camp
     for(let k=0;k<n;k++){
-      const a=rnd(0,6.3), d=rnd(3,12);
-      house(x+Math.cos(a)*d, z+Math.sin(a)*d, rnd(7,11), rnd(7,11), 1, ri(0,2));
+      const w=rnd(7,11), dd=rnd(7,11), r=Math.hypot(w,dd)/2+1.5;
+      // Mehrere Anlaeufe, damit sich Haeuser im selben Camp nicht gegenseitig
+      // ueberlappen — vorher konnten zwei Haeuser so dicht aneinander landen,
+      // dass sich ihre Boeden/Waende gegenseitig durchdrangen ("doppelter Boden").
+      let hx,hz,ok=false;
+      for(let tries=0;tries<8;tries++){
+        const a=rnd(0,6.3), d=rnd(6,16);
+        hx=x+Math.cos(a)*d; hz=z+Math.sin(a)*d;
+        ok=placed.every(p=>Math.hypot(p.x-hx,p.z-hz)>p.r+r);
+        if(ok)break;
+      }
+      if(!ok)continue;   // kein freier Platz gefunden -> lieber weglassen als ueberlappen
+      placed.push({x:hx,z:hz,r:r});
+      house(hx,hz,w,dd,1,ri(0,2));
     }
     for(let k=0;k<ri(3,7);k++){
       const a=rnd(0,6.3), d=rnd(6,20);
@@ -1107,11 +1120,24 @@ function makePOI(cx,cz,seed,type){
     road.rotation.x=-Math.PI/2; road.position.set(cx,0.03,cz); staticAdd(road);
     const road2=road.clone(); road2.rotation.z=Math.PI/2; staticAdd(road2);
   }
+  const placed=[];   // {x,z,r} bereits gesetzte Gebäude dieses POIs, gegen Überlappung
   for(let i=0;i<n;i++){
-    const a=(i/n)*6.283+rnd(-.35,.35), d=i===0?rnd(0,6):rnd(cfg.r*0.45,cfg.r);
     const fl=ri(cfg.fl[0],cfg.fl[1]);
-    const w=type==="city"?rnd(10,14):rnd(9,16);
-    house(cx+Math.cos(a)*d, cz+Math.sin(a)*d, w, rnd(9,16), fl, cfg.style);
+    let w=type==="city"?rnd(10,14):rnd(9,16), dd=rnd(9,16);
+    const rad=Math.hypot(w,dd)/2+1.6;
+    // Mehrere Anlaeufe um Ueberlappungen mit bereits gesetzten Häusern zu
+    // vermeiden — vorher konnten sich zwei Haeuser im selben POI so weit
+    // durchdringen, dass man z.B. zwei Böden übereinander sah ("doppelter Boden").
+    let x,z,ok=false;
+    for(let tries=0;tries<10;tries++){
+      const a=(i/n)*6.283+rnd(-.35,.35), d=i===0?rnd(0,6):rnd(cfg.r*0.45,cfg.r);
+      x=cx+Math.cos(a)*d; z=cz+Math.sin(a)*d;
+      ok=placed.every(p=>Math.hypot(p.x-x,p.z-z)>p.r+rad);
+      if(ok)break;
+    }
+    if(!ok){ w*=0.7; dd*=0.7; }   // kein freier Platz gefunden -> lieber kleiner als überlappend
+    placed.push({x,z,r:Math.hypot(w,dd)/2+1.6});
+    house(x,z,w,dd,fl,cfg.style);
   }
   /* Besonderheiten der einzelnen Orte */
   if(type==="lake"){
@@ -3398,8 +3424,10 @@ function botNearestGun(b){
 
 function botFight(b,dt){
   const tgt=b.target;
-  const d=b.pos.distanceTo(tgt.pos);
   const los=hasLOS(b.pos,tgt.pos);
+  // Ohne Sichtkontakt darf der Bot die reale Distanz zum Gegner nicht kennen
+  // (das waere Wallhack) — er schaetzt sie nur ueber die zuletzt gesehene Stelle.
+  const d=los?b.pos.distanceTo(tgt.pos):b.pos.distanceTo(b.lastSeen||tgt.pos);
   b.aiming=d>14&&d<120;
   if(b.coverT>0)b.coverT-=dt;   // Zeitfenster, in dem der Bot hinter der eigenen Deckung bleibt
 
@@ -3443,12 +3471,15 @@ function botFight(b,dt){
   b.strafeT-=dt; if(b.strafeT<=0){ b.strafe*=-1; b.strafeT=rnd(.7,2.0); }
 
   // ---- Belagerung: Gegner hat sich eingemauert (keine Sicht, aber nah) ----
-  // Statt aufzugeben, wird die Wand dazwischen gezielt kaputtgeschossen, bis
-  // wieder Sichtkontakt besteht — genau wie ein Mensch gegen eine Box vorgeht.
+  // Kein Wallhack: der Bot zielt NICHT auf die reale Live-Position des Gegners
+  // hinter der Wand, sondern nur in Richtung der zuletzt gesehenen Stelle
+  // (trackPos). Er pusht aktiv dorthin und schlaegt/schiesst sich durch, was
+  // dort im Weg steht — genau wie ein Mensch, der weiss "er ist da rein" statt
+  // die Wand exakt an der Stelle des Gegners aufzumachen.
   let wallHit=null;
   const boxed=!!tgt.turtle;
   if(!los&&dist<50&&dist>2.5){
-    const ex=tgt.pos.x-b.pos.x, ey=(tgt.pos.y+1.1)-(b.pos.y+1.5), ez=tgt.pos.z-b.pos.z;
+    const ex=trackPos.x-b.pos.x, ey=(trackPos.y+1.1)-(b.pos.y+1.5), ez=trackPos.z-b.pos.z;
     const elen=Math.hypot(ex,ey,ez);
     if(elen>0.1){
       const h=rayHit(b.pos.x,b.pos.y+1.5,b.pos.z,ex/elen,ey/elen,ez/elen,elen-0.35);
