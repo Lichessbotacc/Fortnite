@@ -324,7 +324,7 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
     <p class="lead">Third-Person Battle Royale mit dem kompletten Arsenal aus Kapitel 1 Saison 4 — vom Pump bis zur Minigun. Echtes Bau-System mit Stützlogik: Wände, Rampen, Böden und Dächer rasten aufs Raster und brauchen Halt. Die Bots looten, farmen Material, bauen sich hoch, blocken Schüsse mit Wänden, heilen sich, tanzen und rotieren in die Zone. Läuft komplett offline im Browser.</p>
     <ul class="keys" id="keysList"></ul>
     <div class="row">
-      <label>Gegner <input type="range" id="optBots" min="9" max="99" value="49" step="1"><b id="optBotsV" style="font-family:Barlow Condensed;color:#e8f1f7">49</b></label>
+      <label>Gegner <input type="range" id="optBots" min="9" max="200" value="99" step="1"><b id="optBotsV" style="font-family:Barlow Condensed;color:#e8f1f7">99</b></label>
       <label>Bot-Stärke
         <select id="optDiff" style="font-family:'Barlow Condensed';font-size:18px;padding:6px;background:#0f1a24;color:#e8f1f7;border:1px solid var(--line)">
           <option value="0.7">Locker</option><option value="1" selected>Normal</option><option value="1.35">Hart</option><option value="1.7">Profi</option>
@@ -671,14 +671,28 @@ function addBox(mesh,res,hp,structure,noRay,noClip,hitBox){
   mesh.updateWorldMatrix(true,true);
   const b=hitBox||new THREE.Box3().setFromObject(mesh);
   const c={min:b.min,max:b.max,mesh:mesh,hp:hp||0,maxhp:hp||0,res:res||null,structure:!!structure,noRay:!!noRay,noClip:!!noClip};
-  colliders.push(c); if(!noRay)hitMeshes.push(mesh); mesh.userData.col=c;
+  c._ci=colliders.length; colliders.push(c);
+  if(!noRay){ mesh.userData._hi=hitMeshes.length; hitMeshes.push(mesh); }
+  mesh.userData.col=c;
   gridAdd(c);
   return c;
 }
+/* Swap-Remove statt indexOf().splice(): bei sehr vielen Collidern (ganze Karte
+   voller Haeuser/Baeume + Spieler-Bauten) war das vorher O(n) pro Entfernung —
+   bei vielen Zerstoerungen kurz hintereinander (Baukampf, Explosionen) summierte
+   sich das spuerbar. Jetzt O(1). */
 function removeCollider(c){
   gridRemove(c);
-  let i=colliders.indexOf(c); if(i>=0)colliders.splice(i,1);
-  i=hitMeshes.indexOf(c.mesh); if(i>=0)hitMeshes.splice(i,1);
+  const ci=c._ci;
+  if(ci!==undefined&&ci>=0&&colliders[ci]===c){
+    const last=colliders.pop();
+    if(last!==c){ colliders[ci]=last; last._ci=ci; }
+  } else { const i=colliders.indexOf(c); if(i>=0)colliders.splice(i,1); }
+  const hi=c.mesh.userData._hi;
+  if(hi!==undefined&&hi>=0&&hitMeshes[hi]===c.mesh){
+    const lastM=hitMeshes.pop();
+    if(lastM!==c.mesh){ hitMeshes[hi]=lastM; lastM.userData._hi=hi; }
+  } else { const i=hitMeshes.indexOf(c.mesh); if(i>=0)hitMeshes.splice(i,1); }
   if(c.mesh.parent)c.mesh.parent.remove(c.mesh);
 }
 let _rayStamp=0;
@@ -2323,7 +2337,7 @@ const player={
 };
 function resetPlayer(){
   player.pos.set(rnd(-HALF+50,HALF-50),rnd(200,265),rnd(-HALF+50,HALF-50));
-  player.vel.set(0,0,0); player.hp=100; player.sh=0; player.alive=true;
+  player.vel.set(0,0,0); player.hp=100; player.sh=0; player.alive=true; _entDirty=true;
   player.mats={wood:0,brick:0,metal:0}; player.matSel="wood";
   player.ammo={light:36,medium:30,shells:12,heavy:6,rocket:0};
   player.slots=newInventory(); player.sel=0; player.build=false; player.kills=0;
@@ -2343,6 +2357,7 @@ const BOTNAMES=["Fuchs","Kiesel","Nebel","Anker","Specht","Kranich","Basalt","Hu
 function spawnBots(n){
   bots.forEach(b=>{ if(b.rig&&b.rig.root.parent)b.rig.root.parent.remove(b.rig.root); });
   bots.length=0;
+  _entDirty=true;
   const names=BOTNAMES.slice().sort(()=>Math.random()-.5);
   for(let i=0;i<n;i++){
     const outfit=OUTFITS[i%OUTFITS.length], skin=SKINS[i%SKINS.length];
@@ -2655,7 +2670,9 @@ function kill(e,src){
     setTimeout(()=>{if(e.rig.root.parent)e.rig.root.parent.remove(e.rig.root);},4500); }
   const killer=src===player?"Du":(src&&src.name?src.name:"Der Sturm");
   feed(killer+" → "+e.name);
-  if(src===player){ player.kills++; sndKill(); }
+  if(src===player){ player.kills++; sndKill();
+    if(KILL_HEAL){ player.sh=Math.min(100,player.sh+30); player.hp=Math.min(100,player.hp+15); updateHUD(); }
+  }
   else if(src&&src.kills!==undefined){ src.kills++;
     if(KILL_HEAL){ src.sh=Math.min(100,src.sh+30); src.hp=Math.min(100,src.hp+15); }
     // Nach einem Kill zieht es den Bot erstmal zur Leiche, um den Loot
@@ -2764,7 +2781,7 @@ function harvestSwing(e,aimPt){
   // Schaden an, obwohl der Wert an sich (20, echter Fortnite-Wert) stimmte.
   for(const t of entityList()){
     if(t===e)continue;
-    if(t.pos.distanceTo(e.pos)<3.6){
+    if(t.pos.distanceTo(e.pos)<3.2){
       const to=new THREE.Vector3().subVectors(t.pos,e.pos).normalize();
       if(to.dot(dir)>0.28){ damage(t,20,e,false); break; }
     }
@@ -2985,12 +3002,21 @@ function botAim(b,dt,tgt){
   const err=Math.abs(((wantYaw-b.yaw+Math.PI)%6.283+6.283)%6.283-Math.PI);
   return err;
 }
-function botAimPoint(b,tgt,dist){
+function botAimPoint(b,tgt,dist,tgtEnt,bulletSpeed){
   const jitter=(1.45-b.skill*0.75)*(0.55+dist*0.022);
+  let px=tgt.x, pz=tgt.z;
+  // Bei echten Geschossen (Sniper/Jagdgewehr) muss vorgehalten werden, sonst
+  // fliegt die Kugel bei einem sich bewegenden Ziel systematisch hinterher —
+  // bessere Bots (skill) halten dabei genauer vor als schlechte.
+  if(bulletSpeed&&tgtEnt&&tgtEnt.vel){
+    const t=dist/bulletSpeed;
+    const lead=clamp(b.skill,0.15,1)*t;
+    px+=tgtEnt.vel.x*lead; pz+=tgtEnt.vel.z*lead;
+  }
   return new THREE.Vector3(
-    tgt.x+rnd(-jitter,jitter),
+    px+rnd(-jitter,jitter),
     tgt.y+1.15+rnd(-jitter*.6,jitter*.6)+(b.skill>.8&&Math.random()<.25?0.55:0),
-    tgt.z+rnd(-jitter,jitter));
+    pz+rnd(-jitter,jitter));
 }
 function botBuildPiece(b,type,dirVec){
   const save=b.piece, savedYaw=b.yaw;
@@ -3501,7 +3527,7 @@ function botFight(b,dt){
   b.noFireT=los?( (b.noFireT||0)+dt ):0;
   const fireTol=(0.12+(1-b.skill)*0.2)+clamp((b.noFireT-0.6)*0.12,0,0.35);
   if((los||wallHit)&&b.reactT<=0&&b.cool<=0&&b.reloading<=0&&dist<maxEngage&&aimErr<fireTol){
-    const ap=wallHit?aimAt:botAimPoint(b,tgt.pos,dist);
+    const ap=wallHit?aimAt:botAimPoint(b,tgt.pos,dist,tgt,w.def.proj==="bullet"?320:0);
     if(shootWeapon(b,ap)){
       b.noFireT=0;
       if(w.def.burst){ b.burstLeft=w.def.burst-1; }
@@ -3512,7 +3538,7 @@ function botFight(b,dt){
     }
   }
   if(b.burstLeft>0&&b.cool<=0&&dist<maxEngage){
-    const ap=botAimPoint(b,tgt.pos,dist);
+    const ap=botAimPoint(b,tgt.pos,dist,tgt,w.def.proj==="bullet"?320:0);
     if(shootWeapon(b,ap))b.burstLeft--;
     if(b.burstLeft<=0)b.cool+=0.35;
   }
@@ -4734,7 +4760,6 @@ function tick(){
   const dt=Math.min(clock.getDelta(),.05);
   GDT=dt;   // fuer zeitbasierte Effekte wie die Minigun-Anlaufzeit
   perfAdapt(dt);
-  _entDirty=true;
   try{ simulate(dt); }
   catch(err){ tickError(err); }        // niemals den Frame abbrechen -> kein Standbild
   try{ drawFrame(dt); }
@@ -4751,6 +4776,8 @@ function tickError(err){
 function simulate(dt){
   if(running&&!paused){
     if(phase==="drop")updateDrop(dt);
+    // _entDirty wird gezielt bei Tod/Spawn gesetzt (siehe kill()) — hier NICHT
+    // mehr pauschal jeden Frame erzwingen, sonst bringt der entityList()-Cache nichts.
     else if(phase==="play")updatePlay(dt);
     else if(phase==="spectate")updateSpectate(dt);
     /* Bot-LOD: weit entfernte Bots denken seltener und werden nicht animiert.
@@ -4773,7 +4800,12 @@ function simulate(dt){
       // Nahe Bots auf mehrere Frames verteilen, damit nicht alle im selben
       // Bild rechnen — das war die Ursache der Ruckler beim Landen.
       const step = far ? PERF.lodStep : (i%stride===slot ? 0 : 1e9);
-      if(b.lodAcc>=step){ updateBot(b,Math.min(b.lodAcc,0.2)); b.lodAcc=-Math.random()*0.03; }
+      if(b.lodAcc>=step){ updateBot(b,Math.min(b.lodAcc,0.2));
+        // Bei weit entfernten Bots ueber das ganze Intervall verteilt neu einordnen
+        // (statt fast synchron alle im selben Frame) — sonst gibt's bei vielen
+        // gleichzeitig weit entfernten Bots einen periodischen Mini-Ruckler.
+        b.lodAcc = far ? -Math.random()*PERF.lodStep*0.9 : -Math.random()*0.03;
+      }
     }
     updateStorm(dt);
     updateProjectiles(dt);
