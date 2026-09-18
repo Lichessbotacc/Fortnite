@@ -4292,8 +4292,21 @@ addEventListener("mousemove",e=>{
   player.pitch=clamp(player.pitch,-1.35,1.25);
 });
 function lock(){ if(renderer&&!TOUCH)renderer.domElement.requestPointerLock(); }
+let _plLostT=null;
 document.addEventListener("pointerlockchange",()=>{
-  if(!TOUCH&&running&&!paused&&phase!=="spectate"&&document.pointerLockElement!==renderer.domElement)setPaused(true);
+  if(document.pointerLockElement===renderer.domElement){
+    if(_plLostT){clearTimeout(_plLostT);_plLostT=null;}          // Lock kam sofort zurück -> false alarm, nicht pausieren
+    return;
+  }
+  // Browser lassen den Pointer-Lock manchmal ganz kurz los und "fangen" ihn
+  // sofort wieder (z.B. beim Klicken, bei manchen Tastenkombis) — das führte
+  // vorher zu einem nervigen, scheinbar zufälligen Auto-Pause. Erst nach
+  // einer kurzen Wartezeit wirklich pausieren, wenn der Lock dann immer noch weg ist.
+  if(_plLostT)clearTimeout(_plLostT);
+  _plLostT=setTimeout(()=>{
+    _plLostT=null;
+    if(!TOUCH&&running&&!paused&&phase!=="spectate"&&document.pointerLockElement!==renderer.domElement)setPaused(true);
+  },220);
 });
 function setPaused(p){
   paused=p;
