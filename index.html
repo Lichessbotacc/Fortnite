@@ -3573,15 +3573,22 @@ function botFight(b,dt){
   b.buildCD-=dt;
   // Baubattle-Wahrscheinlichkeit haengt direkt an der Bot-Staerke (skill/builder):
   // schwache Bots ("Locker") gehen kaum in echte Baubattles, starke ("Profi") fast immer.
-  const battleChance=clamp(b.skill*0.55+b.builder*0.35,0.04,0.95);
-  // Baubattle nur mit nachvollziehbarem Anlass starten (Gegner hoeher / Bot
-  // unter Beschuss) statt staendig auf gut Glueck zu wuerfeln — sonst wirkt
-  // es, als würde der Bot ohne Grund plötzlich lostuermen.
+  const battleChance=clamp(b.skill*0.55+b.builder*0.35,0.15,0.97);
+  // Baubattle: Hoehenunterschied oder Beschuss erhoehen die Wahrscheinlichkeit
+  // deutlich, aber ein Bot im laufenden Duell wuerfelt auch ganz ohne diese
+  // Ausloeser regelmaessig eine Grund-Chance — genau wie ein echter Spieler,
+  // der in einem 1v1 einfach anfaengt hochzubauen, um sich einen Vorteil zu
+  // verschaffen, nicht erst NACHDEM er getroffen wurde. Vorher hing das
+  // komplett an heightGap>1.5 oder hurtT>0 — auf flachem Terrain in einem
+  // normalen Duell (kein Hoehenunterschied, noch nicht getroffen) kam so
+  // so gut wie nie eine Baubattle zustande.
+  const baseChance = clamp(battleChance*0.5,0.06,0.7);
+  const heightBonus = heightGap>1.5 ? battleChance*0.8 : 0;
+  const hurtBonus   = b.hurtT>0 ? battleChance*0.55 : 0;
+  const duelChance  = clamp(baseChance+heightBonus+hurtBonus,0.06,0.98);
   if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&los&&dist>5&&dist<80&&!tgtLow&&
-     botMats(b)>=BUILD_COST*7&&built.size<BUILD_LIMIT*0.9&&
-     ((endgame&&heightGap>2.2)||
-      (heightGap>1.5&&Math.random()<clamp(battleChance*1.3,0.08,0.98))||
-      (b.hurtT>0&&Math.random()<clamp(battleChance*0.9,0.05,0.85)))){
+     botMats(b)>=BUILD_COST*5&&built.size<BUILD_LIMIT*0.9&&
+     ((endgame&&heightGap>2.2)||Math.random()<duelChance)){
     // Duell: sofort hochbauen und Höhe erkämpfen — Startwinkel exakt zum
     // Gegner ausgerichtet, keine zufaellige Verdrehung.
     b.buildUp={ang:Math.atan2(to.z,to.x),phase:"floor",left:ri(8,16),
@@ -4943,7 +4950,15 @@ function simulate(dt){
       // Nahe Bots auf mehrere Frames verteilen, damit nicht alle im selben
       // Bild rechnen — das war die Ursache der Ruckler beim Landen.
       const step = far ? PERF.lodStep : (i%stride===slot ? 0 : 1e9);
-      if(b.lodAcc>=step){ updateBot(b,Math.min(b.lodAcc,0.2));
+      if(b.lodAcc>=step){
+        // Einzeln absichern: ein Fehler bei EINEM Bot (z.B. mitten in einer
+        // Baubattle-Sequenz) darf nicht mehr die komplette restliche Bot-
+        // Schleife fuer diesen Frame abbrechen — vorher konnte genau das
+        // dazu fuehren, dass nach einem Fehler in einem Bot alle folgenden
+        // Bots in der Liste in diesem Frame (und potenziell wiederholt in
+        // jedem weiteren Frame) gar nicht mehr aktualisiert wurden.
+        try{ updateBot(b,Math.min(b.lodAcc,0.2)); }
+        catch(err){ tickError(err); b.buildUp=null; b.turtle=null; }
         // Bei weit entfernten Bots ueber das ganze Intervall verteilt neu einordnen
         // (statt fast synchron alle im selben Frame) — sonst gibt's bei vielen
         // gleichzeitig weit entfernten Bots einen periodischen Mini-Ruckler.
