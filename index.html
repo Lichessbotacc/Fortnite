@@ -2372,10 +2372,18 @@ function spawnFloor(item,x,z,y){
   }
   return o;
 }
+// Vorher fehlte "rocket" in ALLEN drei Munitions-Loot-Quellen komplett — aus
+// Kisten, Munitionskisten und Bodenloot konnte man dadurch nie Raketen-Munition
+// bekommen. Rocket ist selten (Cap nur 12, nicht 999) und die Menge pro Fund
+// entsprechend klein gehalten.
+function ammoLoot(loN,hiN){
+  const t=pick(["light","light","medium","medium","shells","heavy","heavy","rocket"]);
+  return {kind:"ammo", t:t, n:(t==="rocket")?ri(2,5):ri(loN,hiN), name:"Munition"};
+}
 function spawnGroundLoot(x,z){
   const r=Math.random();
   if(r<.5)spawnFloor(randomWeapon(0),x,z);
-  else if(r<.78)spawnFloor({kind:"ammo",t:pick(["light","medium","shells","heavy"]),n:ri(12,30),name:"Munition"},x,z);
+  else if(r<.78)spawnFloor(ammoLoot(12,30),x,z);
   else spawnFloor(randomConsumable(),x,z);
 }
 function spawnChest(x,z){
@@ -2402,7 +2410,7 @@ function openChest(c){
   spawnFloor(randomWeapon(1),c.x+rnd(-1.6,1.6),c.z+rnd(-1.6,1.6),c.y);
   if(Math.random()<.7)spawnFloor(randomWeapon(0),c.x+rnd(-1.6,1.6),c.z+rnd(-1.6,1.6),c.y);
   for(let i=0;i<n;i++){
-    if(Math.random()<.55)spawnFloor({kind:"ammo",t:pick(["light","medium","shells","heavy"]),n:ri(18,36),name:"Munition"},c.x+rnd(-2,2),c.z+rnd(-2,2),c.y);
+    if(Math.random()<.55)spawnFloor(ammoLoot(18,36),c.x+rnd(-2,2),c.z+rnd(-2,2),c.y);
     else spawnFloor(randomConsumable(),c.x+rnd(-2,2),c.z+rnd(-2,2),c.y);
   }
   spawnFloor({kind:"mats",n:100,name:"Material x100"},c.x+rnd(-1.8,1.8),c.z+rnd(-1.8,1.8),c.y);
@@ -2412,7 +2420,7 @@ function openAmmoBox(a){
   if(a.open)return; a.open=true;
   a.mesh.scale.y=.4;
   for(let i=0;i<2;i++)
-    spawnFloor({kind:"ammo",t:pick(["light","medium","shells","heavy"]),n:ri(20,40),name:"Munition"},a.x+rnd(-1.4,1.4),a.z+rnd(-1.4,1.4));
+    spawnFloor(ammoLoot(20,40),a.x+rnd(-1.4,1.4),a.z+rnd(-1.4,1.4));
   sfxAt(new THREE.Vector3(a.x,1,a.z),520,.09,"square",.16);
 }
 function removeLoot(l){
@@ -2940,13 +2948,20 @@ function pickupItem(e,it){
     e.mats.metal=Math.min(999,e.mats.metal+per);
     if(e===player)feed("+"+per+" Material"); return true; }
   if(it.kind==="heal"||it.kind==="throw"||it.kind==="fort"){
+    let ownedFull=false;
     for(let i=1;i<e.slots.length;i++){
       const s=e.slots[i];
-      if(s&&s.id===it.id&&s.n<s.def.stack){
-        const room=s.def.stack-s.n, take=Math.min(room,it.n);
-        s.n+=take; it.n-=take; if(it.n<=0)return true;
+      if(s&&s.id===it.id){
+        if(s.n<s.def.stack){
+          const room=s.def.stack-s.n, take=Math.min(room,it.n);
+          s.n+=take; it.n-=take; if(it.n<=0)return true;
+        } else ownedFull=true;
       }
     }
+    // Item schon vorhanden, aber ueberall voll (z.B. 6/6 Minis): NICHT die
+    // aktuell ausgeruestete Waffe fuer ein zweites, ueberfluessiges Stack-
+    // Fach opfern — vorher landete man genau dadurch waffenlos.
+    if(ownedFull&&it.n>0)return false;
   }
   let idx=-1;
   for(let i=1;i<e.slots.length;i++) if(!e.slots[i]){idx=i;break;}
@@ -4304,8 +4319,15 @@ function updateAutoPickup(dt){
     if(it.kind==="ammo"||it.kind==="mats"){
       pickupItem(player,it); removeLoot(l); sndPickup(); updateHUD();
     } else if(it.kind==="heal"){
-      const has=player.slots.some(s=>s&&s.kind==="heal"&&s.id===it.id);
-      if(has){ pickupItem(player,it); removeLoot(l); sndPickup(); updateHUD(); }
+      // Vorher wurde nur geprüft "hab ich das Item ueberhaupt", nicht ob im
+      // Stack noch Platz ist. War der Stack voll (z.B. 6/6 Minis), landete
+      // das Item trotzdem im Aufheben-Code — und weil kein Slot mehr frei
+      // war, wurde die AKTUELL AUSGERUESTETE WAFFE auf den Boden geworfen,
+      // um Platz fuer ein Heilitem zu schaffen, das man eh schon maximal hat.
+      // Jetzt: nur automatisch aufheben, wenn im vorhandenen Stack wirklich
+      // noch Platz ist.
+      const slot=player.slots.find(s=>s&&s.kind==="heal"&&s.id===it.id);
+      if(slot&&slot.n<slot.def.stack){ pickupItem(player,it); removeLoot(l); sndPickup(); updateHUD(); }
     }
   }
 }
