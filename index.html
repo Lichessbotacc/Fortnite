@@ -5473,6 +5473,7 @@ function updateLab(dt){
       if(duelActive)L.duelEnded=true;
     }
   }
+  if(L.grace>0){ L.grace-=dt; const g=Math.ceil(L.grace); if(g<L._gs&&g>0){ L._gs=g; feed("Start in "+g+" …"); } if(L.grace<=0)labLog("Bots legen los","info"); }
   L.dmgT-=dt; if(L.dmgT<=0){ L.dmgT=.5; labFlushDmg(); }
   if(duelActive&&!L.duelEnded&&(!A.alive||!B.alive)){
     L.duelEnded=true;
@@ -5642,7 +5643,7 @@ function labRing(withP){
 }
 function labStartMatch(withP){
   const L=LAB, c=L.cfg;
-  L.mode="match"; L.matchEnded=false; L.hadPlayer=!!withP; L.setupOpen=false;
+  L.grace=withP?5:1; L._gs=6; L.mode="match"; L.matchEnded=false; L.hadPlayer=!!withP; L.setupOpen=false;
   KILL_HEAL=!!c.lKH;
   labRing(withP);
   for(const b of L.list){
@@ -5719,6 +5720,7 @@ function labPickTarget(b){
 function labMatchDrive(b,dt){
   const L=LAB;
   if(!b.alive||L.matchEnded)return;
+  if(L.grace>0){ b.moveDir=new THREE.Vector3(); b.speed=0; finishBotFrame(b,dt); return; }
   if(!b.target||!b.target.alive){ b.tgtT-=dt; if(b.tgtT<=0){ b.tgtT=1.2; labPickTarget(b); } }
   updateBot(b,dt);
   labWatchBot(b,dt);
