@@ -137,6 +137,12 @@ canvas{display:block;touch-action:none}
   display:none;transform:translate(-50%,-50%)}
 #stick i{position:absolute;left:50%;top:50%;width:58px;height:58px;margin:-29px 0 0 -29px;border-radius:50%;
   background:rgba(200,230,255,.3);border:2px solid rgba(255,255,255,.5)}
+.joybase{position:absolute;width:132px;height:132px;border-radius:50%;display:none;
+  border:2px solid rgba(200,230,255,.35);background:rgba(255,255,255,.05);pointer-events:none}
+.joybase i{position:absolute;left:50%;top:50%;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;
+  background:rgba(200,230,255,.3);border:2px solid rgba(255,255,255,.5);transition:transform .04s linear}
+#stickL{left:22px;bottom:22px}
+#stickR{right:22px;bottom:22px}
 .tb{position:absolute;border-radius:16px;background:rgba(10,18,26,.62);border:1px solid var(--line);
   color:var(--ink);font-family:'Barlow Condensed';font-weight:600;display:flex;align-items:center;justify-content:center;
   text-align:center;line-height:1.05;pointer-events:auto;font-size:16px;padding:4px 6px;touch-action:none;
@@ -278,6 +284,8 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
 
 <div id="touch" class="hidden">
   <div id="stick"><i></i></div>
+  <div id="stickL" class="joybase"><i></i></div>
+  <div id="stickR" class="joybase"><i></i></div>
   <div class="tb" id="tPause">II</div>
   <div class="tb" id="tUnstuck">Frei!</div>
   <div class="tb" id="tEmote">Tanz</div>
@@ -331,6 +339,12 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
         </select>
       </label>
       <label>Sensitivität <input type="range" id="optSens" min="20" max="300" value="100"></label>
+      <label>Touch-Steuerung
+        <select id="optCtrl" style="font-family:'Barlow Condensed';font-size:18px;padding:6px;background:#0f1a24;color:#e8f1f7;border:1px solid var(--line)">
+          <option value="old" selected>Klassisch (Tippen &amp; Ziehen)</option>
+          <option value="new">Sticks (wie Controller)</option>
+        </select>
+      </label>
       <label>Lautstärke <input type="range" id="optVol" min="0" max="100" value="75"></label>
       <label>Grafik
         <select id="optQual" style="font-family:'Barlow Condensed';font-size:18px;padding:6px;background:#0f1a24;color:#e8f1f7;border:1px solid var(--line)">
@@ -1515,9 +1529,41 @@ function makeRig(outfit,skin){
   const blob=new THREE.Mesh(new THREE.CircleGeometry(0.52,12),
     new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:.28,depthWrite:false}));
   blob.rotation.x=-Math.PI/2; root.add(blob);
-  const chute=new THREE.Mesh(new THREE.ConeGeometry(1.8,1.1,10,1,true),
-    new THREE.MeshLambertMaterial({color:outfit.a,side:THREE.DoubleSide}));
-  chute.position.y=3.6; chute.visible=false; yawG.add(chute);
+
+  // Hängegleiter: ein flacher Deltaflügel (wie in Fortnite) statt eines nackten
+  // Kegels — Nase nach vorn, breite Hinterkante mit Mittel-Kerbe, plus duenne
+  // Halteseile zu den Schultern. Zweifarbig (Ober-/Unterseite) fuer mehr Tiefe.
+  const chute=new THREE.Group(); chute.position.y=3.4; chute.visible=false; yawG.add(chute);
+  function wingShape(){
+    const s=new THREE.Shape();
+    s.moveTo(0,1.5);                 // Nase
+    s.lineTo(1.85,-0.55);             // rechte Fluegelspitze
+    s.lineTo(0.35,-0.30);             // rechte Hinterkante, Richtung Mitte
+    s.lineTo(0,-0.55);                // Kerbe in der Mitte (Fortnite-Look)
+    s.lineTo(-0.35,-0.30);            // linke Hinterkante
+    s.lineTo(-1.85,-0.55);            // linke Fluegelspitze
+    s.lineTo(0,1.5);
+    return s;
+  }
+  const wingGeo=new THREE.ExtrudeGeometry(wingShape(),{depth:0.05,bevelEnabled:false});
+  wingGeo.rotateX(-Math.PI/2);
+  const topWing=new THREE.Mesh(wingGeo,new THREE.MeshLambertMaterial({color:outfit.a,side:THREE.DoubleSide}));
+  topWing.scale.set(1,1,1); chute.add(topWing);
+  const underGeo=new THREE.ExtrudeGeometry(wingShape(),{depth:0.05,bevelEnabled:false});
+  underGeo.rotateX(-Math.PI/2); underGeo.scale(0.92,1,0.92);
+  const underWing=new THREE.Mesh(underGeo,new THREE.MeshLambertMaterial({color:outfit.b,side:THREE.DoubleSide}));
+  underWing.position.y=-0.05; chute.add(underWing);
+  // Duenne Halteseile von den Fluegelspitzen/der Nase runter zu den Schultern
+  function riser(fx,fz){
+    const len=Math.hypot(fx,3.4-0.9,fz);
+    const c=new THREE.Mesh(new THREE.CylinderGeometry(0.018,0.018,len,4),
+      new THREE.MeshBasicMaterial({color:0x1c2228}));
+    c.position.set(fx*0.5,-len/2+0.05,fz*0.5);
+    c.rotation.x=Math.atan2(fz,3.4-0.9)* -1;
+    c.rotation.z=Math.atan2(fx,3.4-0.9);
+    chute.add(c);
+  }
+  riser(1.7,-0.5); riser(-1.7,-0.5); riser(0,1.35);
   enableCastShadow(upper); enableCastShadow(hips);
 
   return {root:root,yaw:yawG,blob:blob,hips:hips,upper:upper,neck:neck,head:head,
@@ -3223,12 +3269,12 @@ let buildFighters=0, buildFightT=0;
 function botBuildFightStep(b,dt,to){
   const S=b.buildUp;
   S.life+=dt;
-  if(S.life>34||S.fail>20||S.left<=0||!botPickMat(b,false)||built.size>BUILD_LIMIT*0.97){
+  if(S.life>34||S.fail>28||S.left<=0||!botPickMat(b,false)||built.size>BUILD_LIMIT*0.97){
     b.buildUp=null; b.buildCD=rnd(1.0,2.6); return;
   }
   const dir=new THREE.Vector3(Math.cos(S.ang),0,Math.sin(S.ang));
   b.moveDir.copy(dir); b.speed=6.6;                 // die eigene Rampe hochlaufen
-  if(Math.random()<clamp(0.35-b.skill*0.3,0.02,0.35))S.fail+=0.4; // schwache Bots patzen öfter beim Baubattle
+  if(Math.random()<clamp(0.20-b.skill*0.15,0.01,0.20))S.fail+=0.25; // schwache Bots patzen öfter beim Baubattle, aber nicht mehr so hart bestraft
   b.yaw=bYaw(b,Math.atan2(-to.x,-to.z),.14); // Blick bleibt beim Gegner
   b.building=true;
 
@@ -3263,21 +3309,18 @@ function botBuildFightStep(b,dt,to){
     if(!built.has(t.key))placePiece(b,t);
     b.cool=.09; S.phase="wall";
   } else if(S.phase==="wall"){
-    // ECHTE Box: alle vier Seiten der Etage dicht machen, nicht nur die Seite
-    // zum Gegner — das war der Hauptgrund, warum die Baubattles vorher löchrig
-    // und unglaubwürdig wirkten. Reihenfolge: Gegnerseite zuerst (wichtigste Deckung).
-    const sideL=new THREE.Vector3(-dir.z,0,dir.x), sideR=new THREE.Vector3(dir.z,0,-dir.x);
-    const front=(to.dot(sideL)>0)?sideL:sideR;
-    const back=front.clone().multiplyScalar(-1);
-    const dirs=[front,back,new THREE.Vector3(1,0,0),new THREE.Vector3(-1,0,0),
-                new THREE.Vector3(0,0,1),new THREE.Vector3(0,0,-1)]
-      .filter((v,i,arr)=>arr.findIndex(w=>w.distanceTo(v)<0.01)===i); // Duplikate raus
+    // NUR die Seite zum Gegner hin schliessen, waehrend hochgebaut wird — wie im
+    // echten Fortnite-Baubattle: Deckung in Richtung Gegner, aber nicht komplett
+    // eingemauert. Eine volle 4-Waende-Box JEDE Etage (wie vorher) hat den Bot
+    // von der eigenen Sicht auf den Gegner abgeschnitten ("los"=false), sodass
+    // er weder zielen noch schiessen konnte und einfach nur in einer Kiste
+    // verschwand — kein sichtbarer Baubattle mehr, nur eine Blackbox.
+    // Volle Box (alle 4 Seiten + Dach) gibt's nur ganz oben als Abschluss.
+    const wd=Math.abs(dir.x)>Math.abs(dir.z)?(dir.x>0?"x+":"x-"):(dir.z>0?"z+":"z-");
     let placed=0;
-    for(const wd of dirs){
-      if(botMats(b)<BUILD_COST)break;
-      if(botBuildPiece(b,"wall",wd))placed++;
-    }
+    if(botMats(b)>=BUILD_COST&&botBuildPiece(b,"wall",new THREE.Vector3(dir.x,0,dir.z)))placed++;
     if(placed===0)S.fail++; else S.fail=Math.max(0,S.fail-0.5);
+    S.frontWallDir=wd;
     b.cool=.10; S.phase="ramp";
   } else {
     const ok=botBuildPiece(b,"ramp",dir);
@@ -3290,9 +3333,13 @@ function botBuildFightStep(b,dt,to){
     }
   }
 
-  // Peek: sobald die Box steht, gelegentlich ein Fenster in die gegnerische
-  // Wand editieren, kurz schiessen und wieder schliessen (nur bessere Bots).
-  if(S.roofed&&b.skill>0.42){
+  // Peek: sobald mindestens eine Frontwand steht, gelegentlich ein Fenster
+  // reineditieren, kurz schiessen und wieder schliessen (nur bessere Bots).
+  // Vorher erst ab S.roofed (= ganz oben angekommen) — dadurch war der Bot
+  // waehrend des kompletten Hochbauens fuer den Gegner unsichtbar und hat
+  // selbst nicht zurueckgeschossen. Jetzt peekt er auf JEDER Etage, sobald
+  // eine Frontwand da ist — sichtbares Hin und Her aus Bauen und Schiessen.
+  if(S.frontWallDir&&b.skill>0.32){
     // Menschliches Peeken: kurz Fenster auf, schauen/schiessen, wieder zu,
     // dann eine spuerbare Pause — kein staendiges Ein/Aus-Geflacker mehr.
     S.peekT=(S.peekT||rnd(1.0,2.2))-dt;
@@ -3311,8 +3358,14 @@ function botBuildFightStep(b,dt,to){
     }
   }
 
-  // Ganz oben ein Dach drueber, damit niemand von oben reinspringt
-  if(S.left<=1&&!S.roofed&&botMats(b)>=BUILD_COST*2){
+  // Ganz oben: jetzt erst die komplette Box zumachen (restliche 3 Seiten) und
+  // ein Dach drueber, damit niemand von oben reinspringt — das ist der einzige
+  // Punkt, an dem sich der Bot wirklich komplett einschliesst, nicht schon
+  // auf jeder Zwischenetage beim Hochklettern.
+  if(S.left<=1&&!S.roofed&&botMats(b)>=BUILD_COST*4){
+    const sideL=new THREE.Vector3(-dir.z,0,dir.x), sideR=new THREE.Vector3(dir.z,0,-dir.x);
+    const back=dir.clone().multiplyScalar(-1);
+    for(const wd of [back,sideL,sideR])botBuildPiece(b,"wall",wd);
     const rt=roofTargetAt(c.cx,c.cy+1,c.cz);
     if(!built.has(rt.key))placePiece(b,rt);
     S.roofed=true;
@@ -3333,6 +3386,7 @@ function updateBot(b,dt){
   if(b.swing>0)b.swing-=dt;
   if(b.jumpCD>0)b.jumpCD-=dt;
   if(b.boxOutT>0)b.boxOutT-=dt;
+  if(b.lastWallT>0)b.lastWallT-=dt;
   if(b.turtleCD>0)b.turtleCD-=dt;
   if(b.reloading>0){ b.reloading-=dt; if(b.reloading<=0)finishReload(b); }
   if(b.chatT>0)b.chatT-=dt;
@@ -3353,7 +3407,16 @@ function updateBot(b,dt){
     b.moveDir=to; b.speed=8.4;                    // Sprint aus dem Sturm
     b.yaw=bYaw(b,Math.atan2(-to.x,-to.z),.16);
     b.pitch=lerp(b.pitch,0,.1);
-    if(outside(b.pos.x,b.pos.z,0)&&storm.tick)damage(b,storm.dps,null);
+    // Sturmschaden per Akkumulator statt globalem 1-Frame-"storm.tick"-Flag:
+    // weit entfernte Bots werden gedrosselt aktualisiert (alle 60-260ms statt
+    // jeden Frame, siehe Bot-LOD) und haben dadurch den exakten Frame, in dem
+    // storm.tick kurz "true" war, so gut wie nie getroffen — sie bekamen fast
+    // nie Sturmschaden. Jetzt sammelt jeder Bot seine eigene Zeit im Sturm an
+    // und bekommt garantiert ~1x/Sekunde Schaden, egal wie oft er aktualisiert wird.
+    if(outside(b.pos.x,b.pos.z,0)){
+      b.stormDmgAcc=(b.stormDmgAcc||0)+dt;
+      if(b.stormDmgAcc>=1){ damage(b,storm.dps*Math.floor(b.stormDmgAcc),null); b.stormDmgAcc%=1; }
+    } else b.stormDmgAcc=0;
     b.stormFlee=true; b.forceT=0; b.commitT=0;
     // Fortschritt Richtung Zentrum messen — sonst hängt der Bot am Hindernis fest
     const dCen=Math.hypot(b.pos.x-storm.cx,b.pos.z-storm.cz);
@@ -3586,7 +3649,7 @@ function botFight(b,dt){
   const heightBonus = heightGap>1.5 ? battleChance*0.8 : 0;
   const hurtBonus   = b.hurtT>0 ? battleChance*0.55 : 0;
   const duelChance  = clamp(baseChance+heightBonus+hurtBonus,0.06,0.98);
-  if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&los&&dist>5&&dist<80&&!tgtLow&&
+  if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&los&&dist>8&&dist<80&&!tgtLow&&
      botMats(b)>=BUILD_COST*5&&built.size<BUILD_LIMIT*0.9&&
      ((endgame&&heightGap>2.2)||Math.random()<duelChance)){
     // Duell: sofort hochbauen und Höhe erkämpfen — Startwinkel exakt zum
@@ -3596,19 +3659,34 @@ function botFight(b,dt){
     b.buildCD=rnd(1.6,3.0);
   }
   if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&botPickMat(b,false)){
-    // Klarer Grund fuer jedes Bauteil statt Zufalls-Spam: nur bauen, wenn es
-    // wirklich einen Vorteil bringt — genau eine Wand ODER genau eine Rampe
-    // pro Entscheidung, nie beides "auf gut Glueck".
-    const takingFire = b.hurtT>0.15||w.inMag<=0;          // wird gerade beschossen / leer
-    const needCover  = (takingFire||b.reloading>0||b.hp<55)&&los&&dist>6&&dist<40;
+    // Klarer, ECHTER Grund fuer jedes Bauteil statt Reflex-Spam: vorher reichte
+    // schon alleine "laedt gerade nach" oder "hat <55 HP" (auch ganz ohne
+    // Feindkontakt in dem Moment!), um sofort eine Wand hochzuziehen — dazu
+    // noch ab gerade mal 6 Einheiten Abstand, also praktisch direkt vor der
+    // Nase des Spielers. Das fuehlte sich an, als wuerde man dauernd zugebaut,
+    // nicht wie ein durchdachter Baubattle-Zug. Jetzt: echter Ausloeser ist
+    // NUR tatsaechlicher Beschuss gerade eben (hurtT); Nachladen/wenig HP
+    // erhoehen nur noch die Chance, erzwingen aber nichts mehr von allein.
+    // Zusaetzlich eine spuerbare Mindestdistanz und ein Cooldown PRO ZIEL,
+    // damit derselbe Bot nicht alle 1-2s wieder eine Wand vor denselben
+    // Gegner wirft.
+    const takingFire = b.hurtT>0.15;
+    const sameTargetSpam = b.lastWallTarget===tgt&&(b.lastWallT||0)>0;
+    let coverChance = takingFire ? clamp(b.skill*0.6+0.25,0.3,0.9) : 0;
+    if(b.reloading>0)coverChance+=0.15;
+    if(b.hp<40)coverChance+=0.15;
+    const needCover = takingFire&&!sameTargetSpam&&los&&dist>9&&dist<40&&Math.random()<coverChance;
     // Endgame: bei echtem Hoehenunterschied ist "hochbauen" keine Kuer mehr,
     // sondern Pflicht — sonst schiesst der obere Bot ungestoert von oben rein
     // und der untere Bot steht ratlos herum, weil er nie reagiert.
     const wantsHigh  = heightGap>1.2 && (b.builder>0.35 || (endgame&&heightGap>2.2));
     let acted=false;
     if(needCover){
-      acted=botBuildPiece(b,"wall",to);            // Deckung: konkreter Anlass (Beschuss/Nachladen/wenig HP)
-      if(acted){ b.coverT=1.6; b.buildCD=rnd(1.2,2.2); }
+      acted=botBuildPiece(b,"wall",to);            // Deckung: konkreter Anlass (echter Beschuss gerade eben)
+      if(acted){
+        b.coverT=1.6; b.buildCD=rnd(1.2,2.2);
+        b.lastWallTarget=tgt; b.lastWallT=rnd(4.5,7.5);   // Sperre: nicht gleich wieder gegen dasselbe Ziel
+      }
     }
     if(!acted&&wantsHigh){
       // Statt einer einzelnen Rampe, auf der die Bots vorher oft einfach stehen
@@ -4256,6 +4334,15 @@ function primary(){
 function updatePlay(dt){
   if(!player.alive)return;
   updateAutoPickup(dt);
+  // Rechter Stick im "new"-Schema: echtes Controller-Gefuehl — die Auslenkung
+  // dreht die Kamera kontinuierlich (Rate pro Sekunde), nicht per Delta wie
+  // beim Wischen. Je weiter ausgelenkt, desto schneller die Drehung.
+  if(CTRL_SCHEME==="new"&&(stickRVec.x||stickRVec.y)){
+    const rate=2.6*(SENS.v/0.0022)*(player.aiming?.6:1);
+    player.yaw-=stickRVec.x*rate*dt;
+    player.pitch-=stickRVec.y*rate*dt*0.82;
+    player.pitch=clamp(player.pitch,-1.35,1.25);
+  }
   const w=heldWeapon(player);
   player.aiming=mouseRight&&!player.build&&!!w;
   player.building=false;
@@ -4413,7 +4500,8 @@ addEventListener("keydown",e=>{
   for(let i=1;i<=6;i++) if(e.code===BINDS["slot"+i]){player.sel=i-1;player.build=false;player.reloading=0;player.using=null;sndSwitch();updateHUD();}
 });
 addEventListener("keyup",e=>{keys[e.code]=false;});
-function syncMouseActions(){ mouseDown=actionDown("fire"); mouseRight=actionDown("aim"); }
+let touchAimOn=false;   // eigener Zustand fuer den Touch-"Zielen"-Toggle, unabhaengig von der physischen Maustaste
+function syncMouseActions(){ mouseDown=actionDown("fire"); mouseRight=actionDown("aim")||touchAimOn; }
 // Wichtig: NUR die jeweils tatsaechlich geaenderte Taste anfassen (e.button),
 // nie den kompletten Zustand aus e.buttons neu ableiten — die buttons-Bitmaske
 // ist unter Pointer Lock in manchen Browsern unzuverlaessig und hat vorher
@@ -4467,19 +4555,68 @@ function setPaused(p){
 const touchMove={x:0,y:0};
 let stickId=null,stickOx=0,stickOy=0,lookId=null,lookX=0,lookY=0;
 let editMode=false;
+// "old" = jetzige Tippen&Ziehen-Steuerung (Joystick erscheint da wo man tippt,
+// Kamera per Wischen). "new" = feste Dual-Sticks wie bei einem Controller:
+// links immer fest unten links (Laufen), rechts immer fest unten rechts
+// (Kamera, per Auslenkung/Rate statt per Delta — echtes Controller-Gefuehl).
+let CTRL_SCHEME=localStorage.getItem("sf_ctrl")||"old";
+const stickRVec={x:0,y:0};   // aktuelle Auslenkung des rechten (Kamera-)Sticks im "new"-Schema
 const LAYOUT_KEY="sturmfeld_touch_layout_v2";
+// Eigene, komplett getrennte Layout-Speicherung pro Steuerungs-Schema — wer
+// im "alten" Schema seine Buttons anders hinlegt, soll das im "neuen" Schema
+// (mit den beiden festen Sticks in den unteren Ecken) nicht durcheinanderbringen.
+function layoutKey(){ return CTRL_SCHEME==="new" ? LAYOUT_KEY+"_sticks" : LAYOUT_KEY; }
 const DRAGGABLE_IDS=["tFire","tAds","tJump","tBuild","tUse","tReload","tMat","tPause","tUnstuck","tEmote","tBuildPieces","tEdit"];
-function loadLayout(){ try{return JSON.parse(localStorage.getItem(LAYOUT_KEY)||"{}");}catch(e){return {};} }
-function saveLayoutEntry(id,l,t){ const L=loadLayout(); L[id]={l:l,t:t}; try{localStorage.setItem(LAYOUT_KEY,JSON.stringify(L));}catch(e){} }
+// Sinnvolle Default-Platzierung fuer das "new"-Schema, damit die Action-Buttons
+// nicht einfach auf den beiden festen Sticks in den unteren Ecken landen —
+// wird nur verwendet, solange der Spieler dafuer noch nichts eigenes gespeichert hat.
+const NEW_SCHEME_DEFAULTS={
+  tFire:{l:76,t:52}, tAds:{l:63,t:63}, tJump:{l:88,t:38},
+  tBuild:{l:70,t:30}, tUse:{l:55,t:70}, tReload:{l:90,t:66},
+  tMat:{l:76,t:78}, tPause:{l:3,t:3}, tUnstuck:{l:3,t:14},
+  tEmote:{l:3,t:25}, tEdit:{l:3,t:36}, tBuildPieces:{l:50,t:62}
+};
+function loadLayout(){ try{return JSON.parse(localStorage.getItem(layoutKey())||"{}");}catch(e){return {};} }
+function saveLayoutEntry(id,l,t){ const L=loadLayout(); L[id]={l:l,t:t}; try{localStorage.setItem(layoutKey(),JSON.stringify(L));}catch(e){} }
 function applyTouchLayout(){
   const L=loadLayout();
-  DRAGGABLE_IDS.forEach(id=>{ const n=el(id); if(!n||!L[id])return;
-    n.style.left=L[id].l+"%"; n.style.top=L[id].t+"%"; n.style.right="auto"; n.style.bottom="auto"; });
+  const defaults=CTRL_SCHEME==="new"?NEW_SCHEME_DEFAULTS:{};
+  DRAGGABLE_IDS.forEach(id=>{ const n=el(id); if(!n)return;
+    const spot=L[id]||defaults[id]; if(!spot)return;
+    n.style.left=spot.l+"%"; n.style.top=spot.t+"%"; n.style.right="auto"; n.style.bottom="auto"; });
 }
 function resetLayout(){
-  try{localStorage.removeItem(LAYOUT_KEY);}catch(e){}
+  try{localStorage.removeItem(layoutKey());}catch(e){}
   DRAGGABLE_IDS.forEach(id=>{ const n=el(id); if(!n)return;
     n.style.left="";n.style.top="";n.style.right="";n.style.bottom=""; });
+  applyTouchLayout();  // "new"-Schema faellt dann direkt auf seine eigenen Defaults zurueck statt auf die alten
+}
+// Fixe Stick-Basis: Wissen (statt raten) wo der Kreis gerade sitzt, damit der
+// Kern immer relativ zur sichtbaren Basis auslenkt — echtes Controller-Gefuehl
+// statt eines Joysticks, der irgendwo unterm Finger auftaucht.
+const STICK_MAX=54;
+function stickBaseCenter(id){ const n=el(id); const r=n.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; }
+function moveFixedStick(baseId,clientX,clientY,isLeft){
+  const c=stickBaseCenter(baseId);
+  let dx=clientX-c.x, dy=clientY-c.y;
+  const m=Math.hypot(dx,dy); if(m>STICK_MAX){dx*=STICK_MAX/m;dy*=STICK_MAX/m;}
+  const knob=el(baseId).querySelector("i");
+  if(knob)knob.style.transform="translate("+dx+"px,"+dy+"px)";
+  if(isLeft){ touchMove.x=dx/STICK_MAX; touchMove.y=-dy/STICK_MAX; }
+  else { stickRVec.x=dx/STICK_MAX; stickRVec.y=dy/STICK_MAX; }
+}
+function resetFixedStick(baseId,isLeft){
+  const knob=el(baseId).querySelector("i"); if(knob)knob.style.transform="translate(0,0)";
+  if(isLeft){ touchMove.x=0; touchMove.y=0; } else { stickRVec.x=0; stickRVec.y=0; }
+}
+function applyControlScheme(){
+  const isNew=CTRL_SCHEME==="new";
+  const sl=el("stickL"), sr=el("stickR");
+  if(sl)sl.style.display=(TOUCH&&isNew)?"block":"none";
+  if(sr)sr.style.display=(TOUCH&&isNew)?"block":"none";
+  el("stick").style.display="none"; stickId=null; lookId=null; touchMove.x=0; touchMove.y=0;
+  stickRVec.x=0; stickRVec.y=0;
+  if(!editMode)applyTouchLayout();
 }
 function makeDraggable(n){
   let dragging=false,offX=0,offY=0;
@@ -4529,7 +4666,18 @@ function initTouch(){
     ["pointerup","pointercancel","pointerleave"].forEach(ev=>n.addEventListener(ev,()=>{if(editMode)return;n.classList.remove("on");if(up)up();}));
   };
   hold("tFire",()=>{resumeAudio();rawMouse[0]=true;syncMouseActions();},()=>{rawMouse[0]=false;syncMouseActions();});
-  hold("tAds",()=>{mouseRight=!mouseRight;el("tAds").classList.toggle("on",mouseRight);},null);
+  // tAds ist ein TOGGLE (an/aus per Tap), kein Halte-Button — braucht daher
+  // einen eigenen Listener statt hold(): hold() würde die visuelle "on"-Klasse
+  // automatisch beim Loslassen wieder entfernen, obwohl der Zielen-Zustand
+  // (touchAimOn) weiterhin aktiv bleiben soll. Vorher sah der Button direkt
+  // nach dem Antippen wieder "aus" aus, obwohl man technisch noch zielte.
+  { const n=el("tAds");
+    if(n)n.addEventListener("pointerdown",e=>{
+      if(editMode)return; e.preventDefault();
+      touchAimOn=!touchAimOn; mouseRight=touchAimOn;
+      n.classList.toggle("on",touchAimOn);
+    });
+  }
   hold("tJump",()=>{keys.Space=true;setTimeout(()=>keys.Space=false,140);},null);
   hold("tBuild",()=>{player.build=!player.build;updateHUD();},null);
   PIECES.forEach(pn=>{
@@ -4550,11 +4698,24 @@ function initTouch(){
   hold("tEmote",()=>{player.emoteT=player.emoteT>0?0:4;},null);
   DRAGGABLE_IDS.forEach(id=>{const n=el(id);if(n)makeDraggable(n);});
   applyTouchLayout(); setMatButton();
+  applyControlScheme();
 
   const st=el("stick");
   addEventListener("pointerdown",e=>{
     if(editMode||!running||paused||e.target.closest(".tb")||e.target.closest("button")||e.target.closest(".slot")||e.target.closest("#bottom"))return;
     e.preventDefault();
+    if(CTRL_SCHEME==="new"){
+      // Feste Sticks: linke Bildschirmhaelfte = Laufen, rechte = Kamera —
+      // Basis bleibt immer sichtbar an ihrer festen Position, nur der Kern
+      // in der Mitte lenkt relativ dazu aus (klassisches Controller-Gefuehl).
+      if(e.clientX<innerWidth*0.5&&stickId===null){
+        stickId=e.pointerId; moveFixedStick("stickL",e.clientX,e.clientY,true);
+      } else if(lookId===null){
+        lookId=e.pointerId; moveFixedStick("stickR",e.clientX,e.clientY,false);
+        if(phase==="spectate")cycleSpec(1);
+      }
+      return;
+    }
     if(e.clientX<innerWidth*0.45&&stickId===null){
       stickId=e.pointerId; stickOx=e.clientX; stickOy=e.clientY;
       st.style.display="block"; st.style.left=stickOx+"px"; st.style.top=stickOy+"px";
@@ -4565,6 +4726,11 @@ function initTouch(){
     }
   },{passive:false});
   addEventListener("pointermove",e=>{
+    if(CTRL_SCHEME==="new"){
+      if(e.pointerId===stickId)moveFixedStick("stickL",e.clientX,e.clientY,true);
+      else if(e.pointerId===lookId)moveFixedStick("stickR",e.clientX,e.clientY,false);
+      return;
+    }
     if(e.pointerId===stickId){
       let dx=e.clientX-stickOx, dy=e.clientY-stickOy;
       const m=Math.hypot(dx,dy), max=62;
@@ -4579,6 +4745,11 @@ function initTouch(){
     }
   },{passive:false});
   const endP=e=>{
+    if(CTRL_SCHEME==="new"){
+      if(e.pointerId===stickId){stickId=null;resetFixedStick("stickL",true);}
+      if(e.pointerId===lookId){lookId=null;resetFixedStick("stickR",false);}
+      return;
+    }
     if(e.pointerId===stickId){stickId=null;touchMove.x=0;touchMove.y=0;st.style.display="none";}
     if(e.pointerId===lookId)lookId=null;
   };
@@ -4945,7 +5116,7 @@ function simulate(dt){
       if(cpos){ const dx=b.pos.x-cpos.x, dz=b.pos.z-cpos.z, dy=b.pos.y-cpos.y; d2=dx*dx+dy*dy+dz*dz; }
       const far=d2>near2;
       b.lodSkip = d2>hide2*0.36;
-      if(b.rig)b.rig.root.visible = d2<hide2;
+      if(b.rig)b.rig.root.visible = phase==="drop" ? d2<(PERF.renderDist*PERF.renderDist) : d2<hide2;
       b.lodAcc=(b.lodAcc||0)+dt;
       // Nahe Bots auf mehrere Frames verteilen, damit nicht alle im selben
       // Bild rechnen — das war die Ursache der Ruckler beim Landen.
@@ -5020,6 +5191,7 @@ function wireMenu(){
     if(prefs.bots){ el("optBots").value=prefs.bots; el("optBotsV").textContent=prefs.bots; }
     if(prefs.diff)el("optDiff").value=prefs.diff;
     if(prefs.sens)el("optSens").value=prefs.sens;
+    if(prefs.ctrl&&el("optCtrl"))el("optCtrl").value=prefs.ctrl;
     if(prefs.qual&&el("optQual"))el("optQual").value=prefs.qual;
     if(prefs.killHeal!==undefined&&el("optKillHeal"))el("optKillHeal").checked=prefs.killHeal;
   }catch(e){}
@@ -5027,12 +5199,25 @@ function wireMenu(){
     try{ localStorage.setItem("sf_prefs",JSON.stringify({
       bots:el("optBots").value, diff:el("optDiff").value,
       sens:el("optSens").value, qual:el("optQual")?el("optQual").value:"auto",
+      ctrl:el("optCtrl")?el("optCtrl").value:"old",
       killHeal:el("optKillHeal")?el("optKillHeal").checked:true
     })); }catch(e){}
   }
   ["optBots","optDiff","optSens","optQual","optKillHeal"].forEach(id=>{
     const n=el(id); if(n)n.addEventListener("change",savePrefs);
   });
+  if(el("optCtrl")){
+    el("optCtrl").value=CTRL_SCHEME;
+    el("optCtrl").addEventListener("change",e=>{
+      CTRL_SCHEME=e.target.value;
+      try{localStorage.setItem("sf_ctrl",CTRL_SCHEME);}catch(err){}
+      savePrefs();
+      if(TOUCH)applyControlScheme();
+    });
+    // Auswahl ergibt nur auf einem Touch-Geraet Sinn (Maus/Tastatur hat schon
+    // ihre eigene Tastenbelegung) — sonst nur unnoetige Verwirrung im Menue.
+    if(!TOUCH)el("optCtrl").closest("label").style.display="none";
+  }
   el("optBots").addEventListener("input",e=>el("optBotsV").textContent=e.target.value);
   const volSaved=localStorage.getItem("sf_vol");
   if(volSaved!==null)el("optVol").value=volSaved;
