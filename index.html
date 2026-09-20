@@ -4652,9 +4652,16 @@ function makeDraggable(n){
   };
   n.addEventListener("pointerup",endDrag); n.addEventListener("pointercancel",endDrag);
 }
+let hudWasHidden=false;
 function enterEditMode(){
   el("overlay").classList.add("hidden");
   const t=el("touch"); t.classList.remove("hidden"); t.classList.add("on");
+  // Das komplette HUD (inkl. Waffen-Leiste #bottom) ist ausgeblendet, solange
+  // kein Match laeuft — "anpassen" wird aber meist vom Hauptmenue aus
+  // aufgerufen, VOR dem ersten Match. Ohne das hier war die Waffen-Leiste
+  // schlicht unsichtbar und dadurch unmoeglich zu greifen/verschieben.
+  hudWasHidden=el("hud").classList.contains("hidden");
+  if(hudWasHidden)el("hud").classList.remove("hidden");
   applyTouchLayout(); editMode=true; el("editBar").classList.remove("hidden");
   const bp=el("tBuildPieces"); if(bp)bp.style.display="flex";
   // Sticks nur greifbar (pointer-events) machen, waehrend man aktiv Buttons
@@ -4666,6 +4673,7 @@ function exitEditMode(){
   const bp=el("tBuildPieces"); if(bp)bp.style.display="none";
   el("touch").classList.add("hidden"); el("overlay").classList.remove("hidden");
   el("stickL").classList.remove("editable"); el("stickR").classList.remove("editable");
+  if(hudWasHidden)el("hud").classList.add("hidden");   // Menue-Zustand sauber wiederherstellen
 }
 function setDynLabel(id,text){ const n=el(id); const b=n&&n.querySelector("b"); if(b)b.textContent=text; }
 const MATCOL={wood:"#c98a46",brick:"#b4715a",metal:"#8fa0ad"};
