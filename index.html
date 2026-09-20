@@ -281,6 +281,17 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
   #labPanel #labLog{min-height:64px}
   #labPanel .labKeys{display:none}
 }
+#labPanel{overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+#labPanel>*{flex-shrink:0}
+#labPanel #labLog{flex:none;height:170px;min-height:0}
+#labSelTxt{flex:1;display:flex;align-items:center;justify-content:center;font:600 15px 'Barlow Condensed';background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:7px;white-space:nowrap;overflow:hidden}
+#labSet .setGrid .sh{grid-column:1/-1;color:var(--gold);letter-spacing:1px;margin-top:4px}
+#labTags{position:fixed;inset:0;pointer-events:none;z-index:5;overflow:hidden;display:none}
+.ltag{position:absolute;left:0;top:0;text-align:center;font-family:'Barlow Condensed';font-weight:700;font-size:15px;color:#fff;text-shadow:0 1px 3px #000;white-space:nowrap;will-change:transform}
+.ltag.sel .ln{color:var(--gold)}
+.ltag i{display:block;width:66px;height:7px;margin:2px auto 0;background:rgba(0,0,0,.65);border-radius:3px;position:relative;overflow:hidden}
+.ltag u,.ltag s{position:absolute;left:0;height:3px;display:block;text-decoration:none}
+.ltag u{top:0;background:var(--hp)}.ltag s{top:3px;background:var(--sh)}
 </style>
 </head>
 <body>
@@ -421,44 +432,59 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
   <div class="card" style="text-align:center">
     <h1 style="font-size:54px"><span>PAUSE</span>Match läuft</h1>
     <p class="lead" style="margin-inline:auto">Klicke, um weiterzuspielen.</p>
-    <button id="btnResume">Weiter</button>
+    <button id="btnResume">Weiter</button> <button id="btnLabQuit" class="hidden" style="margin-left:12px">Zurück ins Labor</button>
   </div>
 </div>
 
 
+<div id="labTags"></div>
 <div id="labPanel" class="hidden">
   <div class="labHead"><b>BOT BUILD</b><small>TESTLABOR</small><button id="labExit">Menü <i>Esc</i></button></div>
-  <div class="labRow">
-    <button id="labTower" class="go">▲ Turm<i>1</i></button>
-    <button id="labFight" class="go">⚔ Baufight<i>2</i></button>
-    <button id="labReset">⟲ Reset<i>R</i></button>
-  </div>
+  <div class="labRow"><button id="labPrev" style="flex:0 0 52px">◀</button><div id="labSelTxt">—</div><button id="labNext" style="flex:0 0 52px">▶</button></div>
+  <div class="labRow sm"><button id="labReset">⟲ Stopp / Reset<i>R</i></button><button id="labSetupBtn">⚙ Setup</button></div>
   <div class="labRow sm">
     <button id="labPause">⏸</button>
     <button data-sp="0.1">0.1×</button><button data-sp="0.25">0.25×</button><button data-sp="0.5">0.5×</button><button data-sp="1">1×</button>
     <button id="labStep">Schritt</button>
   </div>
-  <div class="labRow sm">
-    <button id="labCam">Kamera: Orbit</button><button id="labXray">Durchsichtig</button><button id="labCopy">Log kopieren</button>
+  <div class="labRow sm"><button id="labCam">Kamera: Orbit</button><button id="labXray">Durchsichtig</button><button id="labCopy">Log kopieren</button><button id="labFilter">Nur Fehler</button></div>
+  <div id="labSetup">
+    <div class="labRow"><button id="labMatch" class="go">⚔ Match<i>M</i></button><button id="labMatchPlay" class="go">🎮 Match + ich<i>G</i></button></div>
+    <div class="labRow"><button id="labTower">▲ Turm<i>1</i></button><button id="labFight">⚔ Baufight<i>2</i></button></div>
+    <details id="labSet" open>
+      <summary>Einstellungen</summary>
+      <div class="setGrid">
+        <span>Bots <b id="labNV">2</b></span><input type="range" id="labN" min="2" max="10" value="2" step="1">
+        <span>Bot-Stufe</span>
+        <select id="labLevel"><option value="0">Locker</option><option value="1" selected>Normal</option><option value="2">Hart</option><option value="3">Profi</option></select>
+        <b class="sh">LOOT (Match)</b>
+        <span>Waffe 1</span><select id="labW1"></select>
+        <span>Waffe 2</span><select id="labW2"></select>
+        <span>Seltenheit</span>
+        <select id="labRar"><option value="rand" selected>Zufällig</option><option value="0">Gewöhnlich</option><option value="1">Ungewöhnlich</option><option value="2">Selten</option><option value="3">Episch</option><option value="4">Legendär</option></select>
+        <span>Heilung</span>
+        <select id="labHeal"><option value="none">Keine</option><option value="basic" selected>Bandagen + Mini</option><option value="all">Medkit + Schild + Slurp</option><option value="rand">Zufällig</option></select>
+        <span>Heil-Stack <b id="labHealNV">3</b></span><input type="range" id="labHealN" min="0" max="6" value="3" step="1">
+        <span>Munition <b id="labAmmoV">150</b></span><input type="range" id="labAmmo" min="0" max="500" value="150" step="10">
+        <span>Material <b id="labMatNV">300</b></span><input type="range" id="labMatN" min="0" max="999" value="300" step="50">
+        <span>Start-HP <b id="labHpV">100</b></span><input type="range" id="labHp" min="1" max="100" value="100" step="1">
+        <span>Schild <b id="labShV">0</b></span><input type="range" id="labSh" min="0" max="100" value="0" step="5">
+        <span>Tod</span><label class="chk"><input type="checkbox" id="labDrop" checked style="width:auto"> Loot fallen lassen</label>
+        <span>Kill</span><label class="chk"><input type="checkbox" id="labKH" style="width:auto"> Heilung pro Kill</label>
+        <b class="sh">BAU-TESTS</b>
+        <span>Material</span>
+        <select id="labMat"><option value="all" selected>Alle (voll)</option><option value="wood">Holz</option><option value="brick">Stein</option><option value="metal">Metall</option></select>
+        <span>Gegner</span>
+        <select id="labFoe"><option value="still" selected>Steht still</option><option value="build">Baut auch</option></select>
+        <span>Etagen <b id="labFloorsV">12</b></span><input type="range" id="labFloors" min="4" max="100" value="12" step="1">
+        <span>Richtung <b id="labAngV">0°</b></span><input type="range" id="labAng" min="0" max="355" value="0" step="5">
+        <span>Abstand <b id="labDistV">26</b></span><input type="range" id="labDist" min="12" max="40" value="26" step="1">
+        <span>Start</span><label class="chk"><input type="checkbox" id="labRand" style="width:auto"> zufällig im Feld</label>
+        <span>Todeskampf</span><label class="chk"><input type="checkbox" id="labDuel" style="width:auto"> Baufight = Pump + Minis bis einer stirbt</label>
+      </div>
+      <div class="labHint labKeys">Tasten: M Match · G Match+ich · 1/T Turm · 2/B Baufight · R Reset · Tab Bot wechseln · Leertaste Pause · . Schritt · 3–6 Tempo · C Kamera · X durchsichtig · L Log · Pfeile/Mausrad = Kamera</div>
+    </details>
   </div>
-  <details id="labSet" open>
-    <summary>Einstellungen</summary>
-    <div class="setGrid">
-      <span>Bot-Stufe</span>
-      <select id="labLevel"><option value="0">Locker</option><option value="1" selected>Normal</option><option value="2">Hart</option><option value="3">Profi</option></select>
-      <span>Material</span>
-      <select id="labMat"><option value="all" selected>Alle (voll)</option><option value="wood">Holz</option><option value="brick">Stein</option><option value="metal">Metall</option></select>
-      <span>Gegner</span>
-      <select id="labFoe"><option value="still" selected>Steht still</option><option value="build">Baut auch</option></select>
-      <span>Etagen <b id="labFloorsV">12</b></span><input type="range" id="labFloors" min="4" max="100" value="12" step="1">
-      <span>Richtung <b id="labAngV">0°</b></span><input type="range" id="labAng" min="0" max="355" value="0" step="5">
-      <span>Abstand <b id="labDistV">26</b></span><input type="range" id="labDist" min="12" max="40" value="26" step="1">
-      <span>Start</span><label class="chk"><input type="checkbox" id="labRand" style="width:auto"> zufällig im Feld</label>
-      <span>Todeskampf</span><label class="chk"><input type="checkbox" id="labDuel" style="width:auto"> beide Bots: Pump + unendlich Minis, kämpfen im Baufight bis einer stirbt</label>
-    </div>
-    <div class="labHint">Richtung 0° = +X (rot) · 90° = +Z (blau). Turm = kein Gegner, Baufight = Bot baut Richtung Gegner. Todeskampf aktiv: Baufight startet stattdessen einen echten Kampf (Schießen + Bauen) mit Pump-Schrotflinte und nachwachsenden Minitränken, ohne Etagen-Limit, bis ein Bot stirbt.</div>
-    <div class="labHint labKeys">Tasten: 1/T Turm · 2/B Baufight · R Reset · Leertaste Pause · . Schritt · 3–6 Tempo · C Kamera · X durchsichtig · L Log kopieren · Pfeile/Mausrad = Kamera</div>
-  </details>
   <pre id="labStatus"></pre>
   <div id="labLog"></div>
 </div>
@@ -496,9 +522,9 @@ const PR=0.42, PH=1.8, EYE=1.62;
 let scene,camera,renderer,clock,sunLight;
 let running=false,paused=false,phase="menu";
 // Bot-Build-Testlabor (siehe Abschnitt "BOT BUILD")
-const LAB={on:false,bot:null,foe:null,mode:null,cells:22,ts:1,prevTs:1,stepReq:0,cam:"orbit",xray:false,
+const LAB={list:[],sel:0,play:false,matchEnded:false,hadPlayer:false,setupOpen:false,onlyBad:false,dmgAcc:new Map(),dmgT:0,lastNow:0,spikeAt:0,on:false,bot:null,foe:null,mode:null,cells:30,ts:1,prevTs:1,stepReq:0,cam:"orbit",xray:false,
   runT:0,simT:0,runningNow:false,log:[],logDirty:true,uiT:0,orbit:{yaw:.55,pitch:.42,dist:24},ot:null,duelEnded:false,
-  cfg:{level:"1",mat:"all",foeMode:"still",floors:12,ang:0,dist:26,rand:false,duel:false}};
+  cfg:{level:"1",mat:"all",foeMode:"still",floors:12,ang:0,dist:26,rand:false,duel:false,n:2,lW1:"ar",lW2:"pump",lRar:"rand",lHeal:"basic",lHealN:3,lAmmo:150,lMat:300,lHp:100,lSh:0,lDrop:true,lKH:false}};
 const colliders=[], hitMeshes=[];
 let world=new THREE.Group();
 const SENS={v:0.0022};
@@ -2832,7 +2858,7 @@ function updateProjectiles(dt){
 }
 function damage(e,amount,src,head){
   if(!e.alive||amount<=0)return;
-  if(LAB.on&&e.lab&&!(LAB.mode==="fight"&&LAB.cfg.duel))return;   // Lab-Bots sind unverwundbar — außer im Todeskampf
+  if(LAB.on&&e.lab&&!labLive())return;   // Lab-Bots sind unverwundbar — außer im Todeskampf
   let left=amount, shieldHit=false;
   if(e.sh>0){const a=Math.min(e.sh,left);e.sh-=a;left-=a;shieldHit=true;}
   e.hp-=left;
@@ -2847,11 +2873,13 @@ function damage(e,amount,src,head){
     if(src){ e.lastSeen=src.pos.clone(); e.seenT=5; e.panic=1.2; e.hurtT=2.2; e.buildCD=0;
              if(!e.target)e.target=src; }
   }
+  if(LAB.on)labDamage(e,amount,src,head,shieldHit);
   if(e.hp<=0){ e.hp=0; kill(e,src); }
 }
 function kill(e,src){
   _entDirty=true;
   e.alive=false;
+  if(LAB.on)labKilled(e,src);
   const from=e.pos.clone();
   if(e===player){
     player.alive=false;
@@ -2860,6 +2888,7 @@ function kill(e,src){
     if(src&&src!==player&&src.kills!==undefined)src.kills++;
     dropInventory(e);
     if(player.rig)player.rig.root.visible=false;
+    if(LAB.on){ labPlayerDied(); return; }
     enterSpectate();
     return;
   }
@@ -2878,9 +2907,10 @@ function kill(e,src){
     src.freshLoot={x:from.x,z:from.z}; src.freshLootT=7.5;
   }
   dropInventory(e);
-  if(aliveCount()===1&&player.alive)endMatch(true);
+  if(!LAB.on&&aliveCount()===1&&player.alive)endMatch(true);
 }
 function dropInventory(e){
+  if(LAB.on&&!LAB.cfg.lDrop)return;
   for(let i=1;i<e.slots.length;i++){
     const s=e.slots[i]; if(!s)continue;
     spawnFloor(s,e.pos.x+rnd(-1.6,1.6),e.pos.z+rnd(-1.6,1.6),e.pos.y);
@@ -4608,7 +4638,7 @@ function updateDrop(dt){
    ====================================================================== */
 addEventListener("keydown",e=>{
   if(rebindWaiting){ captureRebind(e); e.preventDefault(); return; }
-  if(phase==="lab"){ labKey(e); return; }
+  if(phase==="lab"&&!LAB.play){ labKey(e); return; }
   if(e.code===BINDS.pause){if(running&&!paused)setPaused(true);return;}
   keys[e.code]=true;
   if(!running||paused||phase==="spectate")return;
@@ -4647,7 +4677,7 @@ addEventListener("mouseup",e=>{ if(e.button<=2){rawMouse[e.button]=false; syncMo
 addEventListener("mousemove",e=>{ if(e.buttons===0){rawMouse[0]=rawMouse[1]=rawMouse[2]=false; syncMouseActions();} });
 addEventListener("contextmenu",e=>e.preventDefault());
 addEventListener("wheel",e=>{
-  if(phase==="lab"){ labWheel(e); return; }
+  if(phase==="lab"&&!LAB.play){ labWheel(e); return; }
   if(!running||paused)return;
   if(player.build){const i=PIECES.indexOf(player.piece);player.piece=PIECES[(i+(e.deltaY>0?1:3))%4];}
   else{player.sel=(player.sel+(e.deltaY>0?1:5))%6;player.using=null;}
@@ -4673,12 +4703,12 @@ document.addEventListener("pointerlockchange",()=>{
   if(_plLostT)clearTimeout(_plLostT);
   _plLostT=setTimeout(()=>{
     _plLostT=null;
-    if(!TOUCH&&running&&!paused&&phase!=="spectate"&&phase!=="lab"&&document.pointerLockElement!==renderer.domElement)setPaused(true);
+    if(!TOUCH&&running&&!paused&&phase!=="spectate"&&(phase!=="lab"||LAB.play)&&document.pointerLockElement!==renderer.domElement)setPaused(true);
   },220);
 });
 function setPaused(p){
   paused=p;
-  el("pause").classList.toggle("hidden",!p);
+  el("pause").classList.toggle("hidden",!p); el("btnLabQuit").classList.toggle("hidden",!(LAB.on&&p));
   if(!p)lock(); else if(document.pointerLockElement)document.exitPointerLock();
 }
 
@@ -4843,7 +4873,7 @@ function initTouch(){
 
   const st=el("stick");
   addEventListener("pointerdown",e=>{
-    if(editMode||!running||paused||phase==="lab"||e.target.closest(".tb")||e.target.closest("button")||e.target.closest(".slot")||e.target.closest("#bottom"))return;
+    if(editMode||!running||paused||(phase==="lab"&&!LAB.play)||e.target.closest(".tb")||e.target.closest("button")||e.target.closest(".slot")||e.target.closest("#bottom"))return;
     e.preventDefault();
     if(CTRL_SCHEME==="new"){
       // Feste Sticks: linke Bildschirmhaelfte = Laufen, rechte = Kamera —
@@ -5167,7 +5197,7 @@ const LAB_LEVELS={
 };
 const LAB_MATNAME={all:"Alle (voll)",wood:"Holz",brick:"Stein",metal:"Metall"};
 // HUD-Elemente des normalen Matches, die im Labor stoeren wuerden
-const LAB_HIDE=["top","mapWrap","feed","bottom","ammo","mats","cross","zoneMsg","hitmark","dmgNums"];
+const LAB_HIDE=["top","mapWrap","feed","bottom","ammo","mats","cross","zoneMsg","hitmark"];
 const labEsc=s=>String(s).replace(/[&<>]/g,c=>c==="&"?"&amp;":c==="<"?"&lt;":"&gt;");
 
 /* ---------- Log ---------- */
@@ -5177,13 +5207,13 @@ function labLog(text,cls,tag){
   if(last&&last.text===text&&last.cls===(cls||"")&&last.tag===(tag||"")){ last.n++; last.t=t; }
   else{
     L.log.push({t:t,text:text,cls:cls||"",tag:tag||"",n:1});
-    if(L.log.length>400)L.log.shift();
+    if(L.log.length>1200)L.log.shift();
   }
   L.logDirty=true;
 }
 function labLogText(){
   const c=LAB.cfg, lv=LAB_LEVELS[c.level]||LAB_LEVELS["1"];
-  const head="Bot-Build-Log | Stufe "+lv.name+" | Material "+LAB_MATNAME[c.mat]+
+  const head="Bot-Build-Log | Bots "+c.n+" | Loot "+c.lW1+"/"+c.lW2+"/"+c.lRar+" | Stufe "+lv.name+" | Material "+LAB_MATNAME[c.mat]+
     " | Etagen "+c.floors+" | Richtung "+c.ang+"° | Abstand "+c.dist+
     " | Gegner "+(c.foeMode==="build"?"baut auch":"steht still")+" | Start "+(c.rand?"zufällig":"Zellenmitte");
   return head+"\n"+LAB.log.map(l=>"["+l.t.toFixed(1)+"s] "+(l.tag?l.tag+": ":"")+l.text+(l.n>1?"  ×"+l.n:"")).join("\n");
@@ -5236,21 +5266,18 @@ function buildLabWorld(){
 
 /* ---------- Bots ---------- */
 function labMakeBots(){
-  spawnBots(2);
-  const A=bots[0], B=bots[1];
-  A.name="Bauer"; B.name="Gegner"; A.labTag="Bauer"; B.labTag="Gegner";
+  const n=LAB.cfg.n;
+  spawnBots(n);
   for(const b of bots){
-    b.lab=true; b.state="lab"; b.alive=true; b.rig.root.visible=true;
+    b.labTag=b.name; b.lab=true; b.state="lab"; b.alive=true; b.rig.root.visible=true;
     b.mats={wood:999,brick:999,metal:999}; b.buildUp=null; b.hp=100; b.sh=0;
   }
-  LAB.bot=A; LAB.foe=B; _entDirty=true;
+  LAB.list=bots.slice(); LAB.sel=Math.min(LAB.sel,n-1);
+  LAB.bot=LAB.list[0]; LAB.foe=LAB.list[1]; _entDirty=true;
 }
 function labApplyLevel(){
   const lv=LAB_LEVELS[LAB.cfg.level]||LAB_LEVELS["1"];
-  for(const b of [LAB.bot,LAB.foe]){
-    if(!b)continue;
-    // Leichte, pro Bot zufaellige Streuung um die Stufen-Basiswerte — sonst
-    // spielen beide Bots (gleiche Stufe) exakt im Gleichschritt / spiegelverkehrt.
+  for(const b of LAB.list){
     const jitter=rnd(.88,1.12);
     b.skill=clamp(lv.skill*jitter,.1,1.3);
     b.sensi=clamp(lv.sensi*rnd(.85,1.15),.18,1.05);
@@ -5269,13 +5296,17 @@ function labRefill(b,force){
   }
 }
 function labPlaceBots(){
-  const L=LAB, c=L.cfg, A=L.bot, B=L.foe, half=L.cells*G/2-2;
-  let sx=G/2, sz=G/2;                                   // Mitte der Zelle (0,0)
+  const L=LAB, c=L.cfg, list=L.list, A=list[0], B=list[1], half=L.cells*G/2-2;
+  let sx=G/2, sz=G/2;
   if(c.rand){ sx+=rnd(-12,12); sz+=rnd(-12,12); }
   A.pos.set(sx,0,sz);
   const a=c.ang*Math.PI/180;
   B.pos.set(clamp(sx+Math.cos(a)*c.dist,-half,half),0,clamp(sz+Math.sin(a)*c.dist,-half,half));
-  for(const b of [A,B]){
+  for(let i=2;i<list.length;i++){
+    const t=i/list.length*6.283+.6, r=Math.min(half-3,20+i*2);
+    list[i].pos.set(clamp(Math.cos(t)*r,-half,half),0,clamp(Math.sin(t)*r,-half,half));
+  }
+  for(const b of list){
     b.vel.set(0,0,0); b.onGround=true; b.stuck=0; b.anchor=null; b.anchorT=0; b.forceT=0;
     b.noAvoidT=0; b.jumpCD=0; b.cool=0; b.avoidHold=0; b.avoidDir=null; b.blockedHard=false;
     b.buildUp=null; b.building=false; b.pieceShownT=0; b.swing=0; b.pickT=0; b.sel=0;
@@ -5284,21 +5315,26 @@ function labPlaceBots(){
   }
   A.yaw=Math.atan2(-(B.pos.x-A.pos.x),-(B.pos.z-A.pos.z));
   B.yaw=Math.atan2(-(A.pos.x-B.pos.x),-(A.pos.z-B.pos.z));
+  for(let i=2;i<list.length;i++)list[i].yaw=Math.atan2(list[i].pos.x,list[i].pos.z);
 }
 function labReset(){
   const L=LAB;
+  if(L.play)labSetPlay(false);
   Array.from(built.values()).forEach(r=>destroyBuild(r,true));
   built.clear();
+  for(const l of lootItems.splice(0)){ if(l.mesh&&l.mesh.parent)l.mesh.parent.remove(l.mesh); }
+  L.dmgAcc.clear();
   collapseT=0; collapseCD=0;
-  L.mode=null; L.runT=0; L.runningNow=false; L.ot=null; L.duelEnded=false;
+  L.mode=null; L.runT=0; L.runningNow=false; L.ot=null; L.duelEnded=false; L.matchEnded=false; L.hadPlayer=false; L.setupOpen=false;
+  player.alive=false; if(player.rig)player.rig.root.visible=false;
   labApplyLevel(); labPlaceBots();
-  labRefill(L.bot,true); labRefill(L.foe,true);
-  for(const b of [L.bot,L.foe]){
-    b.hp=100; b.sh=0; b.alive=true;
-    if(b.rig){ b.rig.root.rotation.z=0; b.rig.root.position.y=0;
+  for(const b of L.list){
+    labRefill(b,true);
+    b.hp=100; b.sh=0; b.alive=true; b.kills=0; b.state="lab"; b.target=null;
+    if(b.rig){ b.rig.root.rotation.z=0; b.rig.root.position.y=0; b.rig.root.visible=true;
       if(!b.rig.root.parent)world.add(b.rig.root); }
   }
-  L.foe.rig.root.visible=true;
+  _entDirty=true;
   labSyncButtons();
 }
 // Todeskampf-Ausruestung: Pump-Schrotflinte (legendaer) + immer wieder
@@ -5321,7 +5357,8 @@ function labStart(mode){
   labReset();
   L.log.length=0; L.mode=mode; L.runT=0;
   const fight=mode==="fight";
-  B.rig.root.visible=fight;
+  B.rig.root.visible=fight; L.list.forEach((x,i)=>{ if(i>=2)x.rig.root.visible=false; });
+  if(mode==="match"||mode==="matchPlay"){ labStartMatch(mode==="matchPlay"); return; }
   const angA=fight?Math.atan2(B.pos.z-A.pos.z,B.pos.x-A.pos.x):c.ang*Math.PI/180;
   if(fight&&c.duel){
     // TODESKAMPF: echter Kampf (schießen + bauen) statt der reinen Bau-Routine,
@@ -5374,6 +5411,7 @@ function labWatch(b,S,prev){
 }
 function labDrive(b,other,dt){
   const L=LAB;
+  if(L.mode==="match"){ labMatchDrive(b,dt); return; }
   if(L.mode==="fight"&&L.cfg.duel){
     if(!L.duelEnded&&b.alive){ labDuelGear(b); updateBot(b,dt); }
     return;
@@ -5414,31 +5452,46 @@ function labDrive(b,other,dt){
   }
 }
 function updateLab(dt){
-  const L=LAB, A=L.bot, B=L.foe;
+  const L=LAB, list=L.list, A=list[0], B=list[1];
+  if(dt<=0)L.lastNow=0;
   if(!A||!B||dt<=0)return;
   L.simT+=dt;
-  const duelActive=L.mode==="fight"&&L.cfg.duel;
-  if(A.buildUp||B.buildUp||(duelActive&&!L.duelEnded))L.runT+=dt;
-  const pairs=[[A,B],[B,A]];
-  for(let i=0;i<2;i++){
-    const b=pairs[i][0];
-    try{ labDrive(b,pairs[i][1],dt); }
+  const now=performance.now();
+  if(L.lastNow&&now-L.lastNow>120&&now-L.spikeAt>2000){ L.spikeAt=now; labLog("Ruckler: Frame dauerte "+Math.round(now-L.lastNow)+" ms","warn"); }
+  L.lastNow=now;
+  const duelActive=L.mode==="fight"&&L.cfg.duel, match=L.mode==="match";
+  if(A.buildUp||B.buildUp||(duelActive&&!L.duelEnded)||(match&&!L.matchEnded))L.runT+=dt;
+  for(let i=0;i<list.length;i++){
+    const b=list[i];
+    if(b.alive&&b.rig&&!b.rig.root.parent)world.add(b.rig.root);
+    try{ labDrive(b,i===0?B:i===1?A:null,dt); }
     catch(err){
       tickError(err);
-      const st=(err&&err.stack)?String(err.stack).split("\n").slice(1,3).map(s=>s.trim()).join(" | "):"";
+      const st=(err&&err.stack)?String(err.stack).split("\n").slice(1,3).map(x=>x.trim()).join(" | "):"";
       labLog("FEHLER: "+(err&&err.message?err.message:err)+(st?"  ["+st+"]":""),"bad",b.labTag);
-      b.buildUp=null; b.labIdle=true; b.labPrev=null;   // wie im Match: Fehler beendet die Sequenz
+      b.buildUp=null; b.labIdle=true; b.labPrev=null;
       if(duelActive)L.duelEnded=true;
     }
   }
+  L.dmgT-=dt; if(L.dmgT<=0){ L.dmgT=.5; labFlushDmg(); }
   if(duelActive&&!L.duelEnded&&(!A.alive||!B.alive)){
     L.duelEnded=true;
     const winner=A.alive?A:(B.alive?B:null);
     labLog(winner
-      ? ("ENDE: "+winner.labTag+" ("+winner.name+") gewinnt den Todeskampf nach "+L.runT.toFixed(1)+" s — HP "+winner.hp.toFixed(0)+"/Schild "+winner.sh.toFixed(0))
+      ? ("ENDE: "+winner.labTag+" gewinnt den Todeskampf nach "+L.runT.toFixed(1)+" s — HP "+winner.hp.toFixed(0)+"/Schild "+winner.sh.toFixed(0))
       : "ENDE: beide Bots gleichzeitig gefallen","ok");
   }
-  L.runningNow=duelActive?!L.duelEnded:!!(A.buildUp||B.buildUp);
+  if(match&&!L.matchEnded){
+    const alive=list.filter(b=>b.alive), cnt=alive.length+(player.alive?1:0);
+    if(cnt<=1){
+      L.matchEnded=true; labFlushDmg();
+      const w=player.alive?player:alive[0];
+      labLog(w?"ENDE: "+w.name+" gewinnt das Match nach "+L.runT.toFixed(1)+" s — HP "+Math.ceil(w.hp)+"/Schild "+Math.ceil(w.sh):"ENDE: alle ausgeschaltet","ok");
+      labLog("Kills: "+list.map(b=>b.name+" "+b.kills).join(" · ")+(L.hadPlayer?" · Du "+player.kills:""),"info");
+      if(L.play)labSetPlay(false);
+    }
+  }
+  L.runningNow=duelActive?!L.duelEnded:match?!L.matchEnded:!!(A.buildUp||B.buildUp);
   if(collapseCD>0)collapseCD-=dt;
   if(collapseT>0){ collapseT-=dt; if(collapseT<=0&&collapseCD<=0)runCollapse(); }
 }
@@ -5449,6 +5502,7 @@ function labStepDt(dt){
 }
 // Aus placePiece() aufgerufen: jedes Bauteil der Lab-Bots landet mit Ergebnis im Log
 function labLogPlace(e,t,ok){
+  if(LAB.mode==="match"&&ok)return;
   let txt=(PIECE_NAME[t.type]||t.type)+"  "+t.key;
   if(ok){ labLog("✓ "+txt,"ok",e.labTag); return; }
   let why="?";
@@ -5461,7 +5515,9 @@ function labLogPlace(e,t,ok){
 
 /* ---------- Kamera ---------- */
 function labCamera(dt){
-  const L=LAB, b=L.bot; if(!b)return;
+  const L=LAB;
+  if(L.play&&player.alive){ applyThirdPerson(player,dt); return; }
+  const b=L.list[L.sel]||L.bot; if(!b)return;
   if(L.cam==="bot"){ applyThirdPerson(b,dt); return; }
   const tx=b.pos.x, ty=b.pos.y+1.6, tz=b.pos.z;
   if(!L.ot)L.ot=new THREE.Vector3(tx,ty,tz);
@@ -5498,9 +5554,11 @@ function labSyncButtons(){
   const p=el("labPause"); if(p){ p.classList.toggle("on",L.ts===0); p.textContent=L.ts===0?"▶":"⏸"; }
   const c=el("labCam"); if(c)c.textContent="Kamera: "+(L.cam==="orbit"?"Orbit":"Bot-Sicht");
   const x=el("labXray"); if(x)x.classList.toggle("on",L.xray);
+  const f=el("labFilter"); if(f)f.classList.toggle("on",L.onlyBad);
 }
 function labStatusText(){
   const L=LAB, A=L.bot, B=L.foe, c=L.cfg; if(!A)return "";
+  if(L.mode==="match")return labMatchStatus();
   if(L.mode==="fight"&&c.duel){
     const ln=[];
     ln.push("Modus     TODESKAMPF — Pump + unendlich Minis  ["+(L.duelEnded?"beendet":"läuft")+"]");
@@ -5529,9 +5587,13 @@ function labStatusText(){
 }
 function labUI(dt){
   const L=LAB;
+  labTags();
   L.uiT-=dt;
   if(L.uiT<=0){
     L.uiT=0.12;
+    const v=L.list[L.sel], st=el("labSelTxt");
+    if(st&&v)st.textContent=(L.sel+1)+"/"+L.list.length+" · "+v.name+" · ♥"+Math.ceil(v.hp)+" ⛨"+Math.ceil(v.sh)+(v.alive?"":" ✝");
+    const su=el("labSetup"); if(su)su.classList.toggle("hidden",L.runningNow&&!L.setupOpen);
     const s=el("labStatus"); if(s)s.textContent=labStatusText();
   }
   if(L.logDirty){
@@ -5539,14 +5601,174 @@ function labUI(dt){
     const box=el("labLog"); if(!box)return;
     const stick=box.scrollTop+box.clientHeight>=box.scrollHeight-24;
     let h="";
-    const from=Math.max(0,L.log.length-120);
-    for(let i=from;i<L.log.length;i++){
-      const l=L.log[i];
+    const src=L.onlyBad?L.log.filter(l=>l.cls==="bad"||l.cls==="warn"):L.log;
+    const from=Math.max(0,src.length-150);
+    for(let i=from;i<src.length;i++){
+      const l=src[i];
       h+='<div class="ll '+l.cls+'"><span class="lt">'+l.t.toFixed(1)+'</span>'+
          (l.tag?'<span class="lg">'+labEsc(l.tag)+'</span>':'')+labEsc(l.text)+(l.n>1?' <b>×'+l.n+'</b>':'')+'</div>';
     }
     box.innerHTML=h;
     if(stick)box.scrollTop=box.scrollHeight;
+  }
+}
+
+
+/* ---------- Match-Modus: viele Bots (+ Spieler), Loot-Einstellungen, Fehler-Logs ---------- */
+function labLive(){ return (LAB.mode==="fight"&&LAB.cfg.duel)||LAB.mode==="match"; }
+function labGear(e){
+  const c=LAB.cfg;
+  const pk=v=>v==="rand"?WEAPONS[ri(0,WEAPONS.length-1)]:WEAPONS.find(w=>w.id===v);
+  const rar=()=>c.lRar==="rand"?rarityRoll(0):parseInt(c.lRar,10);
+  e.slots=newInventory(); let i=1;
+  for(const v of [c.lW1,c.lW2]) if(v!=="none"&&i<6){ const d=pk(v); if(d)e.slots[i++]=makeWeapon(d,rar()); }
+  const ids=c.lHeal==="rand"?[CONSUMABLES[ri(0,5)].id,CONSUMABLES[ri(0,5)].id]:
+    ({none:[],basic:["bandage","mini"],all:["medkit","shield","slurp"]})[c.lHeal]||[];
+  if(c.lHealN>0)for(const id of ids) if(i<6){ const d=CONSUMABLES.find(x=>x.id===id); e.slots[i++]=makeConsumable(d,Math.min(c.lHealN,d.stack)); }
+  const A=c.lAmmo; e.ammo={light:A,medium:A,shells:A,heavy:A,rocket:Math.min(A,12)};
+  e.mats={wood:c.lMat,brick:c.lMat,metal:c.lMat}; e.matSel="wood";
+  e.sel=e.slots[1]?1:0; e.reloading=0; e.using=null; e.build=false; e.cool=0;
+}
+function labRing(withP){
+  const L=LAB, list=L.list, n=list.length+(withP?1:0), half=L.cells*G/2-4;
+  const r=Math.min(half,10+n*3.2), off=rnd(0,6.28), pts=[];
+  for(let i=0;i<n;i++){ const t=off+i/n*6.283; pts.push([Math.cos(t)*r,Math.sin(t)*r]); }
+  pts.sort(()=>Math.random()-.5);
+  list.forEach((b,i)=>{
+    b.pos.set(pts[i][0],0,pts[i][1]); b.vel.set(0,0,0); b.yaw=Math.atan2(pts[i][0],pts[i][1]);
+    b.onGround=true; b.stuck=0; b.forceT=0; b.anchor=null; b.buildUp=null;
+  });
+  L.ringP=withP?pts[n-1]:null;
+}
+function labStartMatch(withP){
+  const L=LAB, c=L.cfg;
+  L.mode="match"; L.matchEnded=false; L.hadPlayer=!!withP; L.setupOpen=false;
+  KILL_HEAL=!!c.lKH;
+  labRing(withP);
+  for(const b of L.list){
+    labGear(b); b.hp=c.lHp; b.sh=c.lSh; b.alive=true; b.kills=0;
+    b.buildUp=null; b.labIdle=false; b.state="lab"; b.target=null; b.lastSeen=null; b.seenT=0;
+    b.turtle=null; b.using=null; b.tgtT=rnd(0,.8); b.labWarn={}; b.rig.root.visible=true;
+  }
+  if(withP){
+    const P=L.ringP;
+    resetPlayer(); player.deathPlace=0; player.alive=true; player.state="play"; player.kills=0;
+    player.pos.set(P[0],0,P[1]); player.vel.set(0,0,0); player.onGround=true; player.yaw=Math.atan2(P[0],P[1]); player.pitch=-.12;
+    player.hp=c.lHp; player.sh=c.lSh; labGear(player);
+    if(player.rig)player.rig.root.visible=true;
+  }
+  _entDirty=true;
+  labLog("Start: MATCH — "+L.list.length+" Bots"+(withP?" + Du":"")+" · Waffen "+c.lW1+"/"+c.lW2+" · Seltenheit "+c.lRar+" · Heilung "+c.lHeal+"×"+c.lHealN+" · Muni "+c.lAmmo+" · Mats "+c.lMat+" · HP "+c.lHp+"/Schild "+c.lSh+" · Loot droppen "+(c.lDrop?"ja":"nein"),"info");
+  for(const b of L.list){ const w=heldWeapon(b);
+    labLog("Ausrüstung: "+(w?w.name+" ("+RAR[w.rar].n+")":"KEINE WAFFE")+" · Slots "+b.slots.filter(Boolean).length+" · Muni "+b.ammo.medium,w?"info":"bad",b.labTag); }
+  L.runningNow=true;
+  if(withP)labSetPlay(true);
+}
+function labSetPlay(on){
+  const L=LAB; L.play=!!on;
+  const keep=on?["mapWrap","zoneMsg"]:LAB_HIDE;
+  LAB_HIDE.forEach(id=>{ const n=el(id); if(n)n.style.display=keep.indexOf(id)>=0?"none":""; });
+  el("labPanel").classList.toggle("hidden",!!on);
+  if(TOUCH)el("touch").classList.toggle("hidden",!on);
+  if(on){ paused=false; if(TOUCH){ setMatButton(); applyTouchLayout(); } updateHUD(); lock(); }
+  else {
+    if(document.pointerLockElement)document.exitPointerLock();
+    el("scopeOv").classList.remove("on"); el("prompt").classList.add("hidden");
+    camera.fov=75; camera.updateProjectionMatrix();
+  }
+}
+function labPlayerDied(){
+  labLog("Du wurdest ausgeschaltet — Zuschauen, Bot wechseln mit ◀ ▶","warn");
+  labSetPlay(false);
+}
+function labSelect(d){
+  const L=LAB, n=L.list.length; if(!n)return;
+  for(let k=1;k<=n;k++){ const i=(L.sel+d*k+n*n)%n; if(L.list[i].alive||k===n){ L.sel=i; break; } }
+  L.ot=null;
+}
+function labRespawn(){
+  const L=LAB; if(L.play)labSetPlay(false);
+  Array.from(built.values()).forEach(r=>destroyBuild(r,true)); built.clear();
+  labMakeBots(); labReset();
+  labLog("Bot-Anzahl: "+L.cfg.n,"info");
+}
+function labDamage(e,amount,src,head,shieldHit){
+  const L=LAB;
+  if(!(e!==player&&src===player))dmgNumber(new THREE.Vector3(e.pos.x,e.pos.y+1.9,e.pos.z),amount,head,shieldHit&&!head);
+  const sn=src&&src.name?src.name:"Umwelt", k=sn+">"+e.name;
+  let a=L.dmgAcc.get(k); if(!a){ a={s:sn,e:e,d:0,n:0,h:0}; L.dmgAcc.set(k,a); }
+  a.d+=amount; a.n++; if(head)a.h++;
+}
+function labFlushDmg(){
+  const L=LAB; if(!L.dmgAcc.size)return;
+  for(const a of L.dmgAcc.values()){
+    labLog(a.s+" → "+a.e.name+"  −"+Math.round(a.d)+(a.n>1?" ("+a.n+" Treffer"+(a.h?", "+a.h+"× Kopf":"")+")":(a.h?" KOPFSCHUSS":""))+"  ⇒ HP "+Math.ceil(Math.max(0,a.e.hp))+" / Schild "+Math.ceil(a.e.sh),a.e===player?"bad":"");
+  }
+  L.dmgAcc.clear();
+}
+function labKilled(e,src){
+  labFlushDmg();
+  const n=e.slots.filter((x,i)=>i>0&&x).length;
+  labLog("✝ "+(src&&src.name?src.name:"Umwelt")+" hat "+e.name+" ausgeschaltet"+(LAB.cfg.lDrop?" · Loot fällt: "+n+" Items":" · kein Loot-Drop"),"warn");
+}
+function labPickTarget(b){
+  let best=null,bd=1e9;
+  for(const t of entityList()){ if(t===b||!t.alive)continue; const d=b.pos.distanceTo(t.pos); if(d<bd){ bd=d; best=t; } }
+  if(best){ b.target=best; b.lastSeen=best.pos.clone(); b.seenT=5; }
+}
+function labMatchDrive(b,dt){
+  const L=LAB;
+  if(!b.alive||L.matchEnded)return;
+  if(!b.target||!b.target.alive){ b.tgtT-=dt; if(b.tgtT<=0){ b.tgtT=1.2; labPickTarget(b); } }
+  updateBot(b,dt);
+  labWatchBot(b,dt);
+}
+function labWatchBot(b,dt){
+  const L=LAB, w=b.labWarn||(b.labWarn={}), tag=b.labTag, p=b.pos, half=L.cells*G/2;
+  if(!isFinite(p.x+p.y+p.z)){ labLog("NaN-Position! → zurückgesetzt","bad",tag); p.set(0,1,0); b.vel.set(0,0,0); return; }
+  if(p.y<-3){ labLog("unter die Karte gefallen (y "+p.y.toFixed(1)+") → zurückgesetzt","bad",tag); p.set(rnd(-10,10),1,rnd(-10,10)); b.vel.set(0,0,0); }
+  if(Math.abs(p.x)>half+30||Math.abs(p.z)>half+30){ if(!w.out){ w.out=1; labLog("weit außerhalb der Arena (x "+p.x.toFixed(0)+", z "+p.z.toFixed(0)+")","warn",tag); } } else w.out=0;
+  if(b.stuck>0.9){ if(!w.stuck){ w.stuck=1; labLog("steckt fest (stuck "+b.stuck.toFixed(2)+") bei x "+p.x.toFixed(1)+" y "+p.y.toFixed(1)+" z "+p.z.toFixed(1),"warn",tag); } } else if(b.stuck<0.2)w.stuck=0;
+  if(b.forceT>0){ if(!w.force){ w.force=1; labLog("Watchdog: Zwangsbewegung (kam nicht voran)","warn",tag); } } else w.force=0;
+  w.chk=(w.chk||0)-dt;
+  if(w.chk<=0){
+    w.chk=1.5;
+    const g=heldWeapon(b), armed=botArmed(b);
+    if(!armed&&!w.unarmed){ w.unarmed=1; labLog("unbewaffnet — keine nutzbare Waffe/Munition","bad",tag); } else if(armed)w.unarmed=0;
+    if(g&&g.inMag<=0&&b.ammo[g.def.ammo]<=0&&!w.noAmmo){ w.noAmmo=1; labLog("Munition leer ("+g.name+")","warn",tag); } else if(!g||g.inMag>0||b.ammo[g.def.ammo]>0)w.noAmmo=0;
+    if(b.hp+b.sh<30&&!w.low){ w.low=1; labLog("kritisch: HP "+Math.ceil(b.hp)+" / Schild "+Math.ceil(b.sh),"warn",tag); } else if(b.hp+b.sh>=45)w.low=0;
+  }
+  const cand=b.buildUp?"baut":b.turtle?"Heil-Box":b.using?"heilt":(b.target&&b.target.alive)?"kämpft":"tatenlos";
+  if(cand!==w.st){ w.stc=(w.stc||0)+dt; if(w.stc>.8){ w.st=cand; w.stc=0; w.stT=0; labLog("Zustand: "+cand,"info",tag); } } else { w.stc=0; w.stT=(w.stT||0)+dt; }
+  if(cand==="tatenlos"&&w.stT>5&&!w.idleW){ w.idleW=1; labLog("tatenlos seit "+w.stT.toFixed(0)+" s (kein Ziel, nichts zu tun)","warn",tag); } else if(cand!=="tatenlos")w.idleW=0;
+}
+function labMatchStatus(){
+  const L=LAB, v=L.list[L.sel]; if(!v)return "";
+  const alive=L.list.filter(b=>b.alive).length+(player.alive?1:0), w=heldWeapon(v);
+  return ["Modus     MATCH  ["+(L.matchEnded?"beendet":"läuft")+"]   Zeit "+L.runT.toFixed(1)+" s   Tempo "+(L.ts===0?"Pause":L.ts+"×"),
+    "Lebend    "+alive+" / "+(L.list.length+(L.hadPlayer?1:0)),
+    "Ansicht   "+v.name+"  HP "+Math.ceil(v.hp)+"  Schild "+Math.ceil(v.sh)+"  Kills "+v.kills+(v.alive?"":"  TOT"),
+    "Waffe     "+(w?w.name+"  Mag "+w.inMag+"  Muni "+v.ammo[w.def.ammo]:"—")+"   Ziel "+(v.target&&v.target.alive?v.target.name:"–"),
+    "Pos       x "+v.pos.x.toFixed(1)+"  y "+v.pos.y.toFixed(1)+"  z "+v.pos.z.toFixed(1)+"   stuck "+v.stuck.toFixed(2),
+    "Mats      Holz "+v.mats.wood+"  Stein "+v.mats.brick+"  Metall "+v.mats.metal+"   Bauteile "+built.size].join("\n");
+}
+function labTags(){
+  const box=el("labTags"), L=LAB; if(!box||!camera)return;
+  const list=L.list;
+  while(box.children.length<list.length){
+    const d=document.createElement("div"); d.className="ltag";
+    d.innerHTML='<span class="ln"></span><i><u></u><s></s></i>'; box.appendChild(d);
+  }
+  for(let i=0;i<box.children.length;i++){
+    const d=box.children[i], b=list[i];
+    if(!b||!b.alive||!b.rig||!b.rig.root.visible){ d.style.display="none"; continue; }
+    _pv.set(b.pos.x,b.pos.y+2.4,b.pos.z).project(camera);
+    if(_pv.z>1){ d.style.display="none"; continue; }
+    d.style.display="";
+    d.style.transform="translate("+((_pv.x*.5+.5)*innerWidth).toFixed(1)+"px,"+((-_pv.y*.5+.5)*innerHeight).toFixed(1)+"px) translate(-50%,-100%)";
+    d.classList.toggle("sel",i===L.sel);
+    d.firstChild.textContent=b.name+"  ♥"+Math.ceil(b.hp)+(b.sh>0?" ⛨"+Math.ceil(b.sh):"");
+    d.lastChild.firstChild.style.width=(b.hp/100*100)+"%"; d.lastChild.lastChild.style.width=(b.sh/100*100)+"%";
   }
 }
 
@@ -5577,7 +5799,7 @@ function startLab(){
   el("touch").classList.add("hidden");
   LAB_HIDE.forEach(id=>{ const n=el(id); if(n)n.style.display="none"; });
   el("labPanel").classList.remove("hidden");
-  L.on=true; L.ts=1; L.prevTs=1; L.stepReq=0; L.cam="orbit"; L.xray=false;
+  L.on=true; L.ts=1; L.prevTs=1; L.stepReq=0; L.cam="orbit"; L.xray=false; L.sel=0; L.play=false; L.hadPlayer=false; L.setupOpen=false; el("labTags").style.display="block"; paused=false; el("pause").classList.add("hidden");
   L.simT=0; L.log.length=0; L.logDirty=true; L.uiT=0; L.ot=null;
   camera.fov=75; camera.updateProjectionMatrix();
   running=true; paused=false; phase="lab";
@@ -5586,6 +5808,8 @@ function startLab(){
 }
 function labCleanup(toStart){
   const L=LAB;
+  if(L.play)labSetPlay(false);
+  paused=false; el("pause").classList.add("hidden"); el("labTags").style.display="none";
   L.on=false; running=false; phase="menu";
   labXray(false);
   bots.forEach(b=>{ if(b.rig&&b.rig.root.parent)b.rig.root.parent.remove(b.rig.root); });
@@ -5607,9 +5831,12 @@ function labKey(e){
   const c=e.code, O=LAB.orbit;
   if(c==="Escape"){ exitLab(); return; }
   if(c==="Period"||c==="NumpadDecimal"){ labStep(); e.preventDefault(); return; }
+  if(c==="Tab"){ labSelect(e.shiftKey?-1:1); e.preventDefault(); return; }
   if(e.repeat)return;
   if(c==="Digit1"||c==="KeyT"){ labStart("tower"); }
   else if(c==="Digit2"||c==="KeyB"){ labStart("fight"); }
+  else if(c==="KeyM"){ labStart("match"); }
+  else if(c==="KeyG"){ labStart("matchPlay"); }
   else if(c==="KeyR"){ labReset(); labLog("Reset — Bauteile entfernt, Bots zurückgesetzt","info"); }
   else if(c==="Space"){ labTogglePause(); e.preventDefault(); }
   else if(c==="KeyC"){ labToggleCam(); }
@@ -5641,6 +5868,16 @@ function wireLab(){
   on("labCam",labToggleCam);
   on("labXray",()=>labXray(!LAB.xray));
   on("labCopy",labCopy);
+  on("labPrev",()=>labSelect(-1)); on("labNext",()=>labSelect(1));
+  on("labMatch",()=>labStart("match")); on("labMatchPlay",()=>labStart("matchPlay"));
+  on("labSetupBtn",()=>{ LAB.setupOpen=!LAB.setupOpen; });
+  on("labFilter",()=>{ LAB.onlyBad=!LAB.onlyBad; LAB.logDirty=true; labSyncButtons(); });
+  on("btnLabQuit",()=>{ paused=false; el("pause").classList.add("hidden"); labReset(); labLog("Match beendet — zurück im Labor","info"); });
+  addEventListener("error",ev=>{ if(LAB.on)labLog("JS-FEHLER: "+ev.message+" ("+String(ev.filename||"").split("/").pop()+":"+ev.lineno+")","bad"); });
+  addEventListener("unhandledrejection",ev=>{ if(LAB.on)labLog("Promise-Fehler: "+(ev.reason&&ev.reason.message?ev.reason.message:ev.reason),"bad"); });
+  [["labW1","ar",1],["labW2","pump",1]].forEach(a=>{ const n=el(a[0]);
+    n.innerHTML='<option value="none">Keine</option><option value="rand">Zufällig</option>'+WEAPONS.map(w=>'<option value="'+w.id+'">'+w.name+'</option>').join('');
+    n.value=a[1]; });
   document.querySelectorAll("#labPanel [data-sp]").forEach(b=>b.addEventListener("click",()=>{ labSetSpeed(parseFloat(b.dataset.sp)); b.blur(); }));
   const sel=(id,key,after)=>{ const n=el(id); if(!n)return;
     n.addEventListener("change",()=>{ LAB.cfg[key]=n.value; if(after)after(); n.blur&&n.blur(); }); };
@@ -5656,6 +5893,12 @@ function wireLab(){
   rng("labFloors","floors","labFloorsV","",false);
   rng("labAng","ang","labAngV","°",true);
   rng("labDist","dist","labDistV","",true);
+  rng("labN","n","labNV","",false);
+  const nn=el("labN"); if(nn)nn.addEventListener("change",()=>{ if(LAB.on)labRespawn(); });
+  rng("labHealN","lHealN","labHealNV","",false); rng("labAmmo","lAmmo","labAmmoV","",false);
+  rng("labMatN","lMat","labMatNV","",false); rng("labHp","lHp","labHpV","",false); rng("labSh","lSh","labShV","",false);
+  sel("labW1","lW1"); sel("labW2","lW2"); sel("labRar","lRar"); sel("labHeal","lHeal");
+  [["labDrop","lDrop"],["labKH","lKH"]].forEach(a=>{ const n=el(a[0]); if(n)n.addEventListener("change",()=>{ LAB.cfg[a[1]]=n.checked; }); });
   const rn=el("labRand");
   if(rn)rn.addEventListener("change",()=>{ LAB.cfg.rand=rn.checked; if(LAB.bot&&!LAB.mode)labPlaceBots(); });
   const dl=el("labDuel");
@@ -5663,7 +5906,7 @@ function wireLab(){
   // Orbit-Kamera: Ziehen = drehen, Mausrad / Zwei-Finger-Pinch = zoomen
   const P=new Map(); let pinch=0;
   addEventListener("pointerdown",e=>{
-    if(phase!=="lab"||!renderer||e.target!==renderer.domElement)return;
+    if(phase!=="lab"||LAB.play||!renderer||e.target!==renderer.domElement)return;
     P.set(e.pointerId,{x:e.clientX,y:e.clientY});
     if(P.size===2){ const v=Array.from(P.values()); pinch=Math.hypot(v[0].x-v[1].x,v[0].y-v[1].y); }
     try{ renderer.domElement.setPointerCapture(e.pointerId); }catch(err){}
@@ -5767,12 +6010,13 @@ function tick(){
 let _errCount=0;
 function tickError(err){
   _errCount++;
+  if(LAB.on){ const st=(err&&err.stack)?String(err.stack).split("\n")[1]:""; labLog("FEHLER (Tick): "+(err&&err.message?err.message:err)+(st?"  ["+st.trim()+"]":""),"bad"); }
   if(_errCount<6)console.error("Simulationsfehler:",err);
   if(_errCount===30)console.error("Viele Simulationsfehler — Spiel laeuft weiter.");
 }
 function simulate(dt){
   if(running&&!paused){
-    if(phase==="lab"){ updateLab(dt); return; }
+    if(phase==="lab"){ updateLab(dt); if(LAB.play&&player.alive)updatePlay(dt); updateProjectiles(dt); return; }
     if(phase==="drop")updateDrop(dt);
     // _entDirty wird gezielt bei Tod/Spawn gesetzt (siehe kill()) — hier NICHT
     // mehr pauschal jeden Frame erzwingen, sonst bringt der entityList()-Cache nichts.
@@ -5930,7 +6174,7 @@ function wireMenu(){
   addEventListener("click",e=>{
     if(TOUCH)return;
     if(phase==="spectate"){ if(!e.target.closest("button"))cycleSpec(1); return; }
-    if(running&&!paused&&phase!=="menu"&&phase!=="end"&&phase!=="lab"&&renderer&&document.pointerLockElement!==renderer.domElement)lock();
+    if(running&&!paused&&phase!=="menu"&&phase!=="end"&&(phase!=="lab"||LAB.play)&&renderer&&document.pointerLockElement!==renderer.domElement)lock();
   });
 }
 function showFatalError(err){
