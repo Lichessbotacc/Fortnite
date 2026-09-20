@@ -2101,6 +2101,7 @@ function editStart(){
   if(!rec){ feed("Kein eigenes Bauteil im Blick — Wand/Boden ansehen"); return; }
   ensureTiles(rec);
   EDIT.on=true; EDIT.rec=rec; EDIT.sel=rec.tiles.map(t=>t.open); EDIT.hover=-1; EDIT.paint=null;
+  EDIT.prevDown=false; EDIT.armConfirm=false;
   player.build=false; updateHUD();
   const w=G-.06, wall=rec.type==="wall", ov=new THREE.Group(); EDIT.tiles=[];
   for(let r=0;r<3;r++)for(let c=0;c<3;c++){
@@ -2116,7 +2117,7 @@ function editStart(){
 function editEnd(){
   if(!EDIT.on)return;
   EDIT.on=false; if(EDIT.ov&&EDIT.ov.parent)EDIT.ov.parent.remove(EDIT.ov);
-  EDIT.ov=null; EDIT.rec=null; EDIT.paint=null; editPanelShow(false);
+  EDIT.ov=null; EDIT.rec=null; EDIT.paint=null; EDIT.armConfirm=false; editPanelShow(false);
 }
 function editConfirm(){
   if(!EDIT.on)return;
@@ -2128,16 +2129,30 @@ function editConfirm(){
 }
 function editReset(){ if(EDIT.on)EDIT.sel=EDIT.sel.map(()=>false); }
 function editCancel(){ editEnd(); }
-function editToggle(){ if(EDIT.on)editConfirm(); else editStart(); }
+// Edit-Taste selbst bricht jetzt ab statt zu bestaetigen — bestaetigt wird
+// nur noch ueber Feuer (siehe editUpdate), genau wie gewuenscht.
+function editToggle(){ if(EDIT.on)editCancel(); else editStart(); }
 function editUpdate(){
   if(!EDIT.on)return;
   const rec=EDIT.rec;
   if(!rec.grp.parent||!player.alive||player.pos.distanceTo(rec.grp.position)>14){ editEnd(); return; }
   const dir=new THREE.Vector3(); camera.getWorldDirection(dir);
   EDIT.hover=editPick(camera.position,dir);
-  if(mouseDown){
-    if(EDIT.hover>=0){ if(EDIT.paint===null)EDIT.paint=!EDIT.sel[EDIT.hover]; EDIT.sel[EDIT.hover]=EDIT.paint; }
-  } else EDIT.paint=null;
+  // Neuer Ablauf: Feuer GEDRÜCKT HALTEN = Felder auswählen (auch mehrere
+  // nacheinander, waehrend man ueber sie schaut); Feuer loslassen beendet
+  // die Auswahl-Phase; der naechste separate Feuer-Druck danach bestätigt.
+  const down=mouseDown, pressedNow=down&&!EDIT.prevDown;
+  EDIT.prevDown=down;
+  if(EDIT.armConfirm){
+    if(pressedNow)editConfirm();
+  } else {
+    if(down){
+      if(EDIT.hover>=0){ if(EDIT.paint===null)EDIT.paint=!EDIT.sel[EDIT.hover]; EDIT.sel[EDIT.hover]=EDIT.paint; }
+    } else {
+      if(EDIT.paint!==null)EDIT.armConfirm=true;   // Auswahl-Zug beendet -> naechster Feuer-Druck bestätigt
+      EDIT.paint=null;
+    }
+  }
   for(let i=0;i<9;i++){
     const m=EDIT.tiles[i], s=EDIT.sel[i], h=i===EDIT.hover;
     m.material.color.setHex(s?0x2fa8ff:(h?0xffe27a:0xffffff));
@@ -2148,25 +2163,15 @@ function editPanelShow(on){
   let p=EDIT.panel;
   if(!p){
     p=EDIT.panel=document.createElement("div"); p.id="editPanel";
-    p.addEventListener("pointerdown",e=>{
-      e.stopPropagation(); const b=e.target.closest("button"); if(!b)return; e.preventDefault();
-      ({ok:editConfirm,reset:editReset,cancel:editCancel})[b.dataset.a]();
-    });
+    p.style.pointerEvents="none";   // reine Anzeige, keine Buttons mehr — Bedienung laeuft ueber Feuer
     document.body.appendChild(p);
   }
-  if(on)p.innerHTML='<span>Felder wählen</span><button data-a="ok">Bestätigen<i>'+codeLabel(BINDS.edit)+'</i></button><button data-a="reset">Zurücksetzen<i>R</i></button><button data-a="cancel">Abbrechen<i>⌫</i></button>';
+  if(on)p.innerHTML="<span>Feuer halten: Felder wählen · Feuer tippen: bestätigen · "+codeLabel(BINDS.edit)+": abbrechen</span>";
   p.style.display=on?"flex":"none";
 }
-addEventListener("pointerdown",e=>{ if(EDIT.on&&e.pointerType!=="mouse")EDIT.tp.set(e.pointerId,{x:e.clientX,y:e.clientY}); });
-addEventListener("pointerup",e=>{
-  const s=EDIT.tp.get(e.pointerId); EDIT.tp.delete(e.pointerId);
-  if(!EDIT.on||!s||e.pointerType==="mouse"||!camera)return;
-  if(Math.hypot(e.clientX-s.x,e.clientY-s.y)>12)return;
-  if(e.target.closest&&e.target.closest(".tb,button,.slot,#editPanel"))return;
-  const rc=new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(e.clientX/innerWidth*2-1,-(e.clientY/innerHeight)*2+1),camera);
-  const i=editPick(rc.ray.origin,rc.ray.direction);
-  if(i>=0)EDIT.sel[i]=!EDIT.sel[i];
-});
+/* Die frühere separate Touch-Tap-Logik (jeder Bildschirmtipp schaltete ein
+   Feld um) wurde entfernt: Feuer halten/tippen (siehe editUpdate) steuert
+   jetzt Maus UND Touch einheitlich über denselben "mouseDown"-Zustand. */
 function damageBuild(rec,dmg){
   rec.hp-=dmg;
   const f=clamp(rec.hp/rec.maxhp,0,1);
@@ -2756,7 +2761,13 @@ function spawnBots(n){
       pos:new THREE.Vector3(rnd(-HALF+40,HALF-40),rnd(195,270),rnd(-HALF+40,HALF-40)),
       vel:new THREE.Vector3(), onGround:false, yaw:rnd(0,6.28), pitch:0,
       hp:100, sh:0, alive:true, kills:0,
-      mats:{wood:0,brick:0,metal:0}, matSel:"wood",
+      // Vorher starteten Bots bei 0 Material und haben nur weitab vom Gegner
+      // geerntet (dist>60) — sobald ein echter Fight losging, hatten sie also
+      // fast nie genug zum Bauen und wirkten dadurch viel passiver als im
+      // Bot-Test-Labor (wo IMMER 999 Mats vorhanden sind). Ein moderater
+      // Startvorrat sorgt dafuer, dass Bots von Anfang an genauso Baufights
+      // liefern koennen wie im Labor, ohne wie dort komplett unbegrenzt zu sein.
+      mats:{wood:60,brick:60,metal:60}, matSel:"wood",
       ammo:{light:30,medium:24,shells:10,heavy:4,rocket:0},
       slots:newInventory(), sel:0, build:false, piece:"wall",
       cool:0, reloading:0, aiming:false, building:false, swing:0, kick:0, emoteT:0,
@@ -4718,8 +4729,29 @@ function updatePlay(dt){
   player.vel.x=move.x*sp; player.vel.z=move.z*sp;
   if(actionDown("jump")&&player.onGround&&!player.using){player.vel.y=9.3;player.onGround=false;sndJump();}
   const wasAir=!player.onGround, vy=player.vel.y;
+  const _prevX=player.pos.x, _prevZ=player.pos.z;
   moveEntity(player,dt,PR,PH);
   depenetrate(player,PR,PH);
+  // Anti-Stuck: haengt der Kopf fest (typischer Fall: Treppe mit Boden direkt
+  // darueber, zu wenig Deckenfreiheit fuer den Auto-Step), bewegt sich der
+  // Spieler trotz Eingabe kaum noch vorwaerts. Statt endlos haengen zu bleiben,
+  // wird dann automatisch leicht nachgesprungen (gleiche Idee wie beim
+  // Bot-Stuck-Handling) — das reicht in der Praxis fast immer, um durch die
+  // enge Stelle zu "poppen".
+  const _movedH=Math.hypot(player.pos.x-_prevX,player.pos.z-_prevZ);
+  const _wantH=Math.hypot(move.x,move.z)*sp;
+  if(_wantH>0.6&&_movedH<_wantH*dt*0.25){ player.stuckT=(player.stuckT||0)+dt; }
+  else player.stuckT=Math.max(0,(player.stuckT||0)-dt*2);
+  if(player.stuckT>0.22&&player.onGround){
+    // Nur bei einer Treppe in der Naehe eingreifen — sonst wuerde man auch
+    // beim bewussten Reindruecken in eine normale Wand ständig kleine
+    // Huepfer machen, was sich falsch anfuehlen wuerde.
+    const _nr=nearby(player.pos.x,player.pos.z);
+    if(_nr.some(c=>c.buildRec&&c.buildRec.type==="ramp")){
+      player.vel.y=6.6; player.onGround=false;
+    }
+    player.stuckT=0;
+  }
   if(wasAir&&player.onGround){
     sndLand(-vy);
     if(vy<-20){ damage(player,Math.min(70,(-vy-20)*3.4),null); shake+=.3; }
@@ -4828,11 +4860,17 @@ addEventListener("keydown",e=>{
     if(e.code==="KeyR"||e.code===BINDS.reload){ editReset(); return; }
     if(e.code==="Backspace"){ editCancel(); e.preventDefault(); return; }
   }
-  if(e.code===BINDS.buildToggle){player.build=!player.build;updateHUD();}
-  if(e.code===BINDS.wall){player.build=true;player.piece="wall";updateHUD();}
-  if(e.code===BINDS.ramp){player.build=true;player.piece="ramp";updateHUD();}
-  if(e.code===BINDS.floor){player.build=true;player.piece="floor";updateHUD();}
-  if(e.code===BINDS.roof){player.build=true;player.piece="roof";updateHUD();}
+  // Beim Wechsel zwischen Waffe <-> Bauen wurde bisher der geteilte
+  // "player.cool"-Timer nicht zurückgesetzt: hat man z.B. gerade mit einer
+  // langsamen Waffe (Sniper/Pump) geschossen, lief deren Feuerrate-Cooldown
+  // einfach weiter und blockierte danach auch das Bauen (primary() prüft
+  // "player.cool>0" fuer beides) — und umgekehrt. Daher hier explizit
+  // player.cool=0 bei jedem Wechsel, damit Bauen/Schiessen sofort reagiert.
+  if(e.code===BINDS.buildToggle){player.build=!player.build;player.cool=0;updateHUD();}
+  if(e.code===BINDS.wall){player.build=true;player.piece="wall";player.cool=0;updateHUD();}
+  if(e.code===BINDS.ramp){player.build=true;player.piece="ramp";player.cool=0;updateHUD();}
+  if(e.code===BINDS.floor){player.build=true;player.piece="floor";player.cool=0;updateHUD();}
+  if(e.code===BINDS.roof){player.build=true;player.piece="roof";player.cool=0;updateHUD();}
   if(e.code===BINDS.matCycle){const o=["wood","brick","metal"];player.matSel=o[(o.indexOf(player.matSel)+1)%3];setMatButton();updateHUD();}
   if(e.code===BINDS.reload)startReload(player);
   if(e.code===BINDS.interact)interact();
@@ -4840,7 +4878,7 @@ addEventListener("keydown",e=>{
   if(e.code===BINDS.drop)dropSelected(player);
   if(e.code===BINDS.edit)editToggle();
   if(e.code===BINDS.emote){player.emoteT=player.emoteT>0?0:4;}
-  for(let i=1;i<=6;i++) if(e.code===BINDS["slot"+i]){player.sel=i-1;player.build=false;player.reloading=0;player.using=null;sndSwitch();updateHUD();}
+  for(let i=1;i<=6;i++) if(e.code===BINDS["slot"+i]){player.sel=i-1;player.build=false;player.reloading=0;player.using=null;player.cool=0;sndSwitch();updateHUD();}
 });
 addEventListener("keyup",e=>{keys[e.code]=false;});
 let touchAimOn=false;   // eigener Zustand fuer den Touch-"Zielen"-Toggle, unabhaengig von der physischen Maustaste
@@ -4862,6 +4900,7 @@ addEventListener("wheel",e=>{
   if(!running||paused)return;
   if(player.build){const i=PIECES.indexOf(player.piece);player.piece=PIECES[(i+(e.deltaY>0?1:3))%4];}
   else{player.sel=(player.sel+(e.deltaY>0?1:5))%6;player.using=null;}
+  player.cool=0;
   updateHUD();
 },{passive:true});
 addEventListener("mousemove",e=>{
@@ -5031,9 +5070,9 @@ function initTouch(){
     });
   }
   hold("tJump",()=>{keys.Space=true;setTimeout(()=>keys.Space=false,140);},null);
-  hold("tBuild",()=>{player.build=!player.build;updateHUD();},null);
+  hold("tBuild",()=>{player.build=!player.build;player.cool=0;updateHUD();},null);
   PIECES.forEach(pn=>{
-    hold("t"+pn[0].toUpperCase()+pn.slice(1),()=>{player.piece=pn;player.build=true;updateHUD();},null);
+    hold("t"+pn[0].toUpperCase()+pn.slice(1),()=>{player.piece=pn;player.build=true;player.cool=0;updateHUD();},null);
   });
   hold("tUse",()=>interact(),null);
   hold("tReload",()=>startReload(player),null);
@@ -5150,7 +5189,7 @@ function updateHUD(){
         if(!slotDrag||slotDrag.i!==i)return;
         d.classList.remove("dragging");
         if(!slotDrag.moved){
-          player.sel=i;player.build=false;player.reloading=0;player.using=null;updateHUD();
+          player.sel=i;player.build=false;player.reloading=0;player.using=null;player.cool=0;updateHUD();
         } else {
           const target=document.elementFromPoint(ev.clientX,ev.clientY);
           const targetSlot=target&&target.closest?target.closest(".slot"):null;
