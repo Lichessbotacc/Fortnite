@@ -240,6 +240,47 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
 .stats{font-family:'Barlow Condensed';font-size:22px;color:var(--dim);margin:14px 0 26px}
 .stats b{color:var(--ink)}
 #pause{background:rgba(6,10,14,.9)}
+
+/* ---------- Bot Build — Testlabor ---------- */
+#labPanel{position:fixed;left:14px;top:14px;width:344px;max-height:calc(100% - 28px);display:flex;flex-direction:column;gap:8px;
+  padding:10px 12px 12px;background:rgba(10,15,20,.9);border:1px solid var(--line);border-radius:10px;z-index:9;pointer-events:auto;
+  box-shadow:0 6px 24px rgba(0,0,0,.45)}
+#labPanel,#labPanel *{touch-action:manipulation}
+#labPanel .labHead{display:flex;align-items:baseline;gap:8px}
+#labPanel .labHead b{font-family:'Barlow Condensed';font-size:22px;letter-spacing:2px;color:var(--gold)}
+#labPanel .labHead small{font-family:'Barlow Condensed';font-size:14px;color:var(--dim);letter-spacing:1px;flex:1}
+#labPanel button{font-family:'Barlow Condensed';font-weight:700;font-size:16px;letter-spacing:.4px;padding:8px 10px;
+  background:rgba(111,208,255,.14);color:var(--ink);border:1px solid var(--line);border-radius:7px;cursor:pointer;flex:1;min-height:38px}
+#labPanel button:hover{background:rgba(111,208,255,.28)}
+#labPanel button.on{background:#6fd0ff;color:#06121b;border-color:#fff}
+#labPanel button.go{background:rgba(242,193,78,.2);border-color:var(--gold);font-size:19px;min-height:48px}
+#labPanel button.go:hover{background:rgba(242,193,78,.38)}
+#labPanel button i{font-style:normal;font-size:11px;color:var(--dim);margin-left:4px;font-weight:600}
+#labPanel .labHead button{flex:0 0 auto;min-height:30px;padding:4px 12px;font-size:14px}
+#labPanel .labRow{display:flex;gap:6px}
+#labPanel .labRow.sm button{font-size:14px;padding:6px 4px;min-height:34px}
+#labSet summary{cursor:pointer;font-family:'Barlow Condensed';font-size:15px;color:var(--dim);letter-spacing:1px;padding:2px 0}
+#labSet .setGrid{display:grid;grid-template-columns:96px 1fr;gap:6px 10px;align-items:center;margin-top:6px;
+  font-family:'Barlow Condensed';font-size:15px;color:var(--dim)}
+#labSet .setGrid b{color:var(--ink);font-weight:600}
+#labPanel select{font-family:'Barlow Condensed';font-size:15px;padding:4px 6px;background:#0f1a24;color:var(--ink);
+  border:1px solid var(--line);border-radius:5px;width:100%}
+#labPanel input[type=range]{width:100%}
+#labPanel .chk{font-size:15px;gap:6px}
+#labPanel .labHint{font-family:'Barlow Condensed';font-size:13px;color:var(--dim);margin-top:6px;line-height:1.3}
+#labStatus{margin:0;padding:7px 8px;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;color:#cfe2ee;background:rgba(0,0,0,.38);
+  border:1px solid rgba(150,200,230,.14);border-radius:6px;white-space:pre;overflow-x:auto;-webkit-user-select:text;user-select:text}
+#labPanel #labLog{flex:1;min-height:90px;overflow-y:auto;font:12px/1.38 ui-monospace,Menlo,Consolas,monospace;background:rgba(0,0,0,.38);
+  border:1px solid rgba(150,200,230,.14);border-radius:6px;padding:6px 8px;-webkit-user-select:text;user-select:text;touch-action:pan-y}
+#labLog .ll{white-space:pre-wrap;word-break:break-word;color:#b9cbd8}
+#labLog .ll.ok{color:#7fe0a8}#labLog .ll.bad{color:#ff8f80}#labLog .ll.warn{color:#ffd76a}#labLog .ll.info{color:#8fa5b6}
+#labLog .lt{color:#5f7484;margin-right:6px}
+#labLog .lg{color:#9ec8ff;margin-right:6px}
+@media (max-width:820px){
+  #labPanel{left:6px;right:6px;top:6px;width:auto;max-height:54vh;padding:8px 10px}
+  #labPanel #labLog{min-height:64px}
+  #labPanel .labKeys{display:none}
+}
 </style>
 </head>
 <body>
@@ -358,6 +399,7 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
     <button id="btnSpectate" class="ghost" style="background:transparent;color:var(--ink);border:1px solid var(--line);margin-left:12px">Nur zuschauen</button>
     <button id="btnEditControls" class="ghost" style="background:transparent;color:var(--ink);border:1px solid var(--line);margin-left:12px">Touch-Steuerung anpassen</button>
     <button id="btnKeybinds" class="ghost" style="background:transparent;color:var(--ink);border:1px solid var(--line);margin-left:12px">Tasten belegen</button>
+    <button id="btnBotBuild" class="ghost" style="background:transparent;color:var(--ink);border:1px solid var(--line);margin-left:12px">Bot Build (Testlabor)</button>
   </div>
 
   <div class="card hidden" id="bindCard" style="max-width:640px">
@@ -381,6 +423,43 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
     <p class="lead" style="margin-inline:auto">Klicke, um weiterzuspielen.</p>
     <button id="btnResume">Weiter</button>
   </div>
+</div>
+
+
+<div id="labPanel" class="hidden">
+  <div class="labHead"><b>BOT BUILD</b><small>TESTLABOR</small><button id="labExit">Menü <i>Esc</i></button></div>
+  <div class="labRow">
+    <button id="labTower" class="go">▲ Turm<i>1</i></button>
+    <button id="labFight" class="go">⚔ Baufight<i>2</i></button>
+    <button id="labReset">⟲ Reset<i>R</i></button>
+  </div>
+  <div class="labRow sm">
+    <button id="labPause">⏸</button>
+    <button data-sp="0.1">0.1×</button><button data-sp="0.25">0.25×</button><button data-sp="0.5">0.5×</button><button data-sp="1">1×</button>
+    <button id="labStep">Schritt</button>
+  </div>
+  <div class="labRow sm">
+    <button id="labCam">Kamera: Orbit</button><button id="labXray">Durchsichtig</button><button id="labCopy">Log kopieren</button>
+  </div>
+  <details id="labSet" open>
+    <summary>Einstellungen</summary>
+    <div class="setGrid">
+      <span>Bot-Stufe</span>
+      <select id="labLevel"><option value="0">Locker</option><option value="1" selected>Normal</option><option value="2">Hart</option><option value="3">Profi</option></select>
+      <span>Material</span>
+      <select id="labMat"><option value="all" selected>Alle (voll)</option><option value="wood">Holz</option><option value="brick">Stein</option><option value="metal">Metall</option></select>
+      <span>Gegner</span>
+      <select id="labFoe"><option value="still" selected>Steht still</option><option value="build">Baut auch</option></select>
+      <span>Etagen <b id="labFloorsV">12</b></span><input type="range" id="labFloors" min="4" max="20" value="12" step="1">
+      <span>Richtung <b id="labAngV">0°</b></span><input type="range" id="labAng" min="0" max="355" value="0" step="5">
+      <span>Abstand <b id="labDistV">26</b></span><input type="range" id="labDist" min="12" max="40" value="26" step="1">
+      <span>Start</span><label class="chk"><input type="checkbox" id="labRand" style="width:auto"> zufällig im Feld</label>
+    </div>
+    <div class="labHint">Richtung 0° = +X (rot) · 90° = +Z (blau). Turm = kein Gegner, Baufight = Bot baut Richtung Gegner.</div>
+    <div class="labHint labKeys">Tasten: 1/T Turm · 2/B Baufight · R Reset · Leertaste Pause · . Schritt · 3–6 Tempo · C Kamera · X durchsichtig · L Log kopieren · Pfeile/Mausrad = Kamera</div>
+  </details>
+  <pre id="labStatus"></pre>
+  <div id="labLog"></div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -415,6 +494,10 @@ const PR=0.42, PH=1.8, EYE=1.62;
 
 let scene,camera,renderer,clock,sunLight;
 let running=false,paused=false,phase="menu";
+// Bot-Build-Testlabor (siehe Abschnitt "BOT BUILD")
+const LAB={on:false,bot:null,foe:null,mode:null,cells:22,ts:1,prevTs:1,stepReq:0,cam:"orbit",xray:false,
+  runT:0,simT:0,runningNow:false,log:[],logDirty:true,uiT:0,orbit:{yaw:.55,pitch:.42,dist:24},ot:null,
+  cfg:{level:"1",mat:"all",foeMode:"still",floors:12,ang:0,dist:26,rand:false}};
 const colliders=[], hitMeshes=[];
 let world=new THREE.Group();
 const SENS={v:0.0022};
@@ -1800,7 +1883,7 @@ function canBuild(e,t){
 function matMesh(mt){ return mt==="wood"?MAT.wood:mt==="brick"?MAT.brick:MAT.metal; }
 
 function placePiece(e,t,silent){
-  if(!canBuild(e,t))return false;
+  if(!canBuild(e,t)){ if(LAB.on&&e.lab)labLogPlace(e,t,false); return false; }
   const mt=e.matSel, mat=matMesh(mt), hp=MATHP[mt];
   const grp=new THREE.Group(); grp.position.copy(t.pos); grp.rotation.y=t.rotY;
   staticAdd(grp); grp.updateMatrixWorld(true);
@@ -1855,6 +1938,7 @@ function placePiece(e,t,silent){
   if(!silent){ if(e===player)sndBuild(mt,1); else sndBuild(mt,distVol(t.pos,70)*.8); }
   puff(t.pos,mt);
   if(!LOWFX)grp.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=true; } });
+  if(LAB.on&&e.lab)labLogPlace(e,t,true);
   return true;
 }
 /* ---------- Editieren (Fenster/Tür aus Wänden schneiden, wie in Fortnite) ---------- */
@@ -2304,6 +2388,7 @@ function initStorm(){
   storm.cx=rnd(-70,70); storm.cz=rnd(-70,70); storm.r=MAP*0.8;
   storm.tx=storm.cx; storm.tz=storm.cz; storm.tr=storm.r;
   storm.phase=0; storm.t=PHASES[0].wait; storm.state="wait"; storm.dps=0.5; storm.tickT=1; storm.tick=false;
+  if(storm.mesh)storm.mesh.visible=true;
   if(!storm.mesh){
     const g=new THREE.CylinderGeometry(1,1,440,56,1,true);
     storm.mesh=new THREE.Mesh(g,new THREE.MeshBasicMaterial({
@@ -2746,6 +2831,7 @@ function updateProjectiles(dt){
 }
 function damage(e,amount,src,head){
   if(!e.alive||amount<=0)return;
+  if(LAB.on&&e.lab)return;          // Lab-Bots sind unverwundbar
   let left=amount, shieldHit=false;
   if(e.sh>0){const a=Math.min(e.sh,left);e.sh-=a;left-=a;shieldHit=true;}
   e.hp-=left;
@@ -3148,6 +3234,7 @@ function botBuildPiece(b,type,dirVec){
   b.piece=type;
   const t=buildTargetFor(b);
   const ok=placePiece(b,t);
+  if(ok)b.lastPlaced=t;
   b.piece=save;
   // Sichtbar bleibt der Bot danach in Richtung des Bauziels gedreht (nicht
   // zurückspringen), nur die Berechnung selbst war das Problem.
@@ -3334,14 +3421,15 @@ function botBuildFightStep(b,dt,to){
     // Volle Box (alle 4 Seiten + Dach) gibt's nur ganz oben als Abschluss.
     const wd=Math.abs(dir.x)>Math.abs(dir.z)?(dir.x>0?"x+":"x-"):(dir.z>0?"z+":"z-");
     let placed=0;
-    if(botMats(b)>=BUILD_COST&&botBuildPiece(b,"wall",new THREE.Vector3(dir.x,0,dir.z)))placed++;
-    if(placed===0)S.fail++; else S.fail=Math.max(0,S.fail-0.5);
+    // Front-Wand wird erst NACH der Rampe an deren Hinterkante gesetzt (siehe ramp-Phase)
     S.frontWallDir=wd;
     b.cool=.10; S.phase="ramp";
   } else {
     const ok=botBuildPiece(b,"ramp",dir);
     b.cool=.10;
     if(ok){
+      const rt=b.lastPlaced;
+      if(rt&&rt.dir&&botMats(b)>=BUILD_COST)placePiece(b,wallTargetAt(rt.cx,rt.cy,rt.cz,rt.dir));
       if(b.onGround){ b.vel.y=9.8; b.jumpCD=.35; }
       S.y0=b.pos.y; S.phase="climb"; S.climbT=0;
     } else {
@@ -4126,7 +4214,7 @@ function finishBotFrame(b,dt){
   b.anchorT+=dt;
   if(b.anchorT>1.7){
     const disp=Math.hypot(b.pos.x-b.anchor.x,b.pos.z-b.anchor.z);
-    if(disp<2.0&&!b.using&&!b.turtle&&!b.stormFlee){
+    if(disp<2.0&&!b.using&&!b.turtle&&!b.stormFlee&&!b.labIdle){
       if(b.harvest){ b.harvestBad.add(b.harvest); b.harvest=null; }
       if(b.lootGoal&&b.lootGoal.loot)b.ignore.add(b.lootGoal.loot);
       b.lootGoal=null; b.farmGoal=null; b.goalT=0; b.harvestT=0;
@@ -4507,6 +4595,7 @@ function updateDrop(dt){
    ====================================================================== */
 addEventListener("keydown",e=>{
   if(rebindWaiting){ captureRebind(e); e.preventDefault(); return; }
+  if(phase==="lab"){ labKey(e); return; }
   if(e.code===BINDS.pause){if(running&&!paused)setPaused(true);return;}
   keys[e.code]=true;
   if(!running||paused||phase==="spectate")return;
@@ -4545,6 +4634,7 @@ addEventListener("mouseup",e=>{ if(e.button<=2){rawMouse[e.button]=false; syncMo
 addEventListener("mousemove",e=>{ if(e.buttons===0){rawMouse[0]=rawMouse[1]=rawMouse[2]=false; syncMouseActions();} });
 addEventListener("contextmenu",e=>e.preventDefault());
 addEventListener("wheel",e=>{
+  if(phase==="lab"){ labWheel(e); return; }
   if(!running||paused)return;
   if(player.build){const i=PIECES.indexOf(player.piece);player.piece=PIECES[(i+(e.deltaY>0?1:3))%4];}
   else{player.sel=(player.sel+(e.deltaY>0?1:5))%6;player.using=null;}
@@ -4570,7 +4660,7 @@ document.addEventListener("pointerlockchange",()=>{
   if(_plLostT)clearTimeout(_plLostT);
   _plLostT=setTimeout(()=>{
     _plLostT=null;
-    if(!TOUCH&&running&&!paused&&phase!=="spectate"&&document.pointerLockElement!==renderer.domElement)setPaused(true);
+    if(!TOUCH&&running&&!paused&&phase!=="spectate"&&phase!=="lab"&&document.pointerLockElement!==renderer.domElement)setPaused(true);
   },220);
 });
 function setPaused(p){
@@ -4740,7 +4830,7 @@ function initTouch(){
 
   const st=el("stick");
   addEventListener("pointerdown",e=>{
-    if(editMode||!running||paused||e.target.closest(".tb")||e.target.closest("button")||e.target.closest(".slot")||e.target.closest("#bottom"))return;
+    if(editMode||!running||paused||phase==="lab"||e.target.closest(".tb")||e.target.closest("button")||e.target.closest(".slot")||e.target.closest("#bottom"))return;
     e.preventDefault();
     if(CTRL_SCHEME==="new"){
       // Feste Sticks: linke Bildschirmhaelfte = Laufen, rechte = Kamera —
@@ -5049,10 +5139,485 @@ function exitSpectateUI(){
 }
 
 /* ======================================================================
+   BOT BUILD — Testlabor
+   Ein Bot (und optional ein Gegner) baut in einer kleinen Arena mit vollen
+   Materialien. Es laeuft EXAKT dieselbe Bau-Routine wie im Match
+   (botBuildFightStep / placePiece / finishBotFrame) — nur ohne Sturm, Loot
+   und Kampf drumherum. Dazu: Zeitlupe, Einzelschritt, Orbit-Kamera,
+   durchsichtige Bauteile und ein Bau-Log mit Fehlergruenden.
+   ====================================================================== */
+const LAB_LEVELS={
+  "0":{name:"Locker",skill:.30,sensi:.38},
+  "1":{name:"Normal",skill:.60,sensi:.50},
+  "2":{name:"Hart",  skill:.90,sensi:.60},
+  "3":{name:"Profi", skill:1.15,sensi:.72}
+};
+const LAB_MATNAME={all:"Alle (voll)",wood:"Holz",brick:"Stein",metal:"Metall"};
+// HUD-Elemente des normalen Matches, die im Labor stoeren wuerden
+const LAB_HIDE=["top","mapWrap","feed","bottom","ammo","mats","cross","zoneMsg","hitmark","dmgNums"];
+const labEsc=s=>String(s).replace(/[&<>]/g,c=>c==="&"?"&amp;":c==="<"?"&lt;":"&gt;");
+
+/* ---------- Log ---------- */
+function labLog(text,cls,tag){
+  const L=LAB, last=L.log[L.log.length-1];
+  const t=Math.round(L.runT*10)/10;
+  if(last&&last.text===text&&last.cls===(cls||"")&&last.tag===(tag||"")){ last.n++; last.t=t; }
+  else{
+    L.log.push({t:t,text:text,cls:cls||"",tag:tag||"",n:1});
+    if(L.log.length>400)L.log.shift();
+  }
+  L.logDirty=true;
+}
+function labLogText(){
+  const c=LAB.cfg, lv=LAB_LEVELS[c.level]||LAB_LEVELS["1"];
+  const head="Bot-Build-Log | Stufe "+lv.name+" | Material "+LAB_MATNAME[c.mat]+
+    " | Etagen "+c.floors+" | Richtung "+c.ang+"° | Abstand "+c.dist+
+    " | Gegner "+(c.foeMode==="build"?"baut auch":"steht still")+" | Start "+(c.rand?"zufällig":"Zellenmitte");
+  return head+"\n"+LAB.log.map(l=>"["+l.t.toFixed(1)+"s] "+(l.tag?l.tag+": ":"")+l.text+(l.n>1?"  ×"+l.n:"")).join("\n");
+}
+function labCopyFallback(txt,done){
+  try{
+    const ta=document.createElement("textarea"); ta.value=txt;
+    ta.style.cssText="position:fixed;left:-9999px;top:0";
+    document.body.appendChild(ta); ta.select();
+    const ok=document.execCommand("copy"); ta.remove(); done(!!ok);
+  }catch(e){ done(false); }
+}
+function labCopy(){
+  const txt=labLogText();
+  const done=ok=>labLog(ok?"Log in die Zwischenablage kopiert":"Kopieren nicht möglich — Log im Feld markieren und manuell kopieren",ok?"info":"warn");
+  try{
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt).then(()=>done(true),()=>labCopyFallback(txt,done));
+      return;
+    }
+  }catch(e){}
+  labCopyFallback(txt,done);
+}
+
+/* ---------- Welt: kleine, flache Arena mit Raster im Bau-Takt ---------- */
+function buildLabWorld(){
+  world=new THREE.Group(); scene.add(world);
+  chunks=new Map(); chunkList.length=0;
+  colliders.length=0; hitMeshes.length=0; chests.length=0; lootItems.length=0;
+  POIS.length=0; ammoBoxes.length=0; grid.clear();
+  POIS.push({name:"Labor",x:0,z:0,type:0});   // spawnBots() braucht mindestens einen POI
+  const g=new THREE.Mesh(new THREE.PlaneGeometry(MAP,MAP),MAT.grass);
+  g.rotation.x=-Math.PI/2; g.receiveShadow=!LOWFX; world.add(g); hitMeshes.push(g);
+  // Arena-Boden: eine Kachel = genau eine Bau-Zelle (G), Kanten liegen auf Vielfachen von G
+  const N=LAB.cells, W=N*G;
+  const tex=makeTex(64,(x,s)=>{
+    x.fillStyle="#2b3540"; x.fillRect(0,0,s,s);
+    x.strokeStyle="rgba(150,205,235,.6)"; x.lineWidth=2; x.strokeRect(1,1,s-2,s-2);
+  },N,N);
+  const fl=new THREE.Mesh(new THREE.PlaneGeometry(W,W),MT(0xffffff,tex));
+  fl.rotation.x=-Math.PI/2; fl.position.y=0.03; fl.receiveShadow=!LOWFX; world.add(fl);
+  // Randmarkierung + Achsen: rot = +X (0°), blau = +Z (90°)
+  const edge=M(0x6fd0ff);
+  [[W,.12,.35,0,.06,-W/2],[W,.12,.35,0,.06,W/2],[.35,.12,W,-W/2,.06,0],[.35,.12,W,W/2,.06,0]].forEach(a=>{
+    const m=new THREE.Mesh(BOX,edge); m.scale.set(a[0],a[1],a[2]); m.position.set(a[3],a[4],a[5]); world.add(m);
+  });
+  const mx=new THREE.Mesh(BOX,M(0xff5a4d)); mx.scale.set(.8,1.2,3); mx.position.set(W/2+1.4,.6,0); world.add(mx);
+  const mz=new THREE.Mesh(BOX,M(0x4fb8ff)); mz.scale.set(3,1.2,.8); mz.position.set(0,.6,W/2+1.4); world.add(mz);
+}
+
+/* ---------- Bots ---------- */
+function labMakeBots(){
+  spawnBots(2);
+  const A=bots[0], B=bots[1];
+  A.name="Bauer"; B.name="Gegner"; A.labTag="Bauer"; B.labTag="Gegner";
+  for(const b of bots){
+    b.lab=true; b.state="lab"; b.alive=true; b.rig.root.visible=true;
+    b.mats={wood:999,brick:999,metal:999}; b.buildUp=null; b.hp=100; b.sh=0;
+  }
+  LAB.bot=A; LAB.foe=B; _entDirty=true;
+}
+function labApplyLevel(){
+  const lv=LAB_LEVELS[LAB.cfg.level]||LAB_LEVELS["1"];
+  for(const b of [LAB.bot,LAB.foe]){
+    if(!b)continue;
+    b.skill=lv.skill; b.sensi=lv.sensi; b.builder=clamp(lv.skill*.9,.1,1);
+  }
+}
+// "Full Mats": nicht verfuegbare Materialien bleiben bei 0, die gewaehlten werden immer wieder auf 999 aufgefuellt
+function labRefill(b,force){
+  const m=LAB.cfg.mat;
+  for(const k of ["wood","brick","metal"]){
+    const allowed=(m==="all"||m===k);
+    if(!allowed)b.mats[k]=0;
+    else if(force||b.mats[k]<200)b.mats[k]=999;
+  }
+}
+function labPlaceBots(){
+  const L=LAB, c=L.cfg, A=L.bot, B=L.foe, half=L.cells*G/2-2;
+  let sx=G/2, sz=G/2;                                   // Mitte der Zelle (0,0)
+  if(c.rand){ sx+=rnd(-12,12); sz+=rnd(-12,12); }
+  A.pos.set(sx,0,sz);
+  const a=c.ang*Math.PI/180;
+  B.pos.set(clamp(sx+Math.cos(a)*c.dist,-half,half),0,clamp(sz+Math.sin(a)*c.dist,-half,half));
+  for(const b of [A,B]){
+    b.vel.set(0,0,0); b.onGround=true; b.stuck=0; b.anchor=null; b.anchorT=0; b.forceT=0;
+    b.noAvoidT=0; b.jumpCD=0; b.cool=0; b.avoidHold=0; b.avoidDir=null; b.blockedHard=false;
+    b.buildUp=null; b.building=false; b.pieceShownT=0; b.swing=0; b.pickT=0; b.sel=0;
+    b.stormFail=0; b.stormProgT=0; b.stormLastD=undefined; b.labPrev=null; b.labLast=null;
+    b.labStuckLogged=false; b.labForce=false; b.target=null; b.labIdle=true; b.pitch=0;
+  }
+  A.yaw=Math.atan2(-(B.pos.x-A.pos.x),-(B.pos.z-A.pos.z));
+  B.yaw=Math.atan2(-(A.pos.x-B.pos.x),-(A.pos.z-B.pos.z));
+}
+function labReset(){
+  const L=LAB;
+  Array.from(built.values()).forEach(r=>destroyBuild(r,true));
+  built.clear();
+  collapseT=0; collapseCD=0;
+  L.mode=null; L.runT=0; L.runningNow=false; L.ot=null;
+  labApplyLevel(); labPlaceBots();
+  labRefill(L.bot,true); labRefill(L.foe,true);
+  L.foe.rig.root.visible=true;
+  labSyncButtons();
+}
+
+/* ---------- Sequenzen starten ---------- */
+function labStart(mode){
+  const L=LAB, c=L.cfg, A=L.bot, B=L.foe;
+  if(!A||!B)return;
+  labReset();
+  L.log.length=0; L.mode=mode; L.runT=0;
+  const fight=mode==="fight";
+  B.rig.root.visible=fight;
+  const angA=fight?Math.atan2(B.pos.z-A.pos.z,B.pos.x-A.pos.x):c.ang*Math.PI/180;
+  // exakt dieselben Startwerte wie der Duell-Aufbau in botFight()
+  A.buildUp={ang:angA,phase:"floor",left:c.floors,levels:0,fail:0,life:0,climbT:0,y0:A.pos.y,roofed:false,labTotal:c.floors};
+  A.target=fight?B:null;
+  if(fight){
+    const d=Math.hypot(B.pos.x-A.pos.x,B.pos.z-A.pos.z);
+    labLog("Start: BAUFIGHT — Gegner "+(c.foeMode==="build"?"baut auch":"steht still")+", Abstand "+d.toFixed(1)+", Richtung "+((angA*180/Math.PI+360)%360).toFixed(0)+"°, "+c.floors+" Etagen","info");
+    if(c.foeMode==="build"){
+      B.buildUp={ang:angA+Math.PI,phase:"floor",left:c.floors,levels:0,fail:0,life:0,climbT:0,y0:B.pos.y,roofed:false,labTotal:c.floors};
+      B.target=A;
+    }
+  } else {
+    labLog("Start: TURM — "+c.floors+" Etagen, Richtung "+((angA*180/Math.PI+360)%360).toFixed(0)+"° (kein Gegner)","info");
+  }
+  L.runningNow=true;
+}
+function labEndReason(b,S){
+  if(S.left<=0)return "fertig — alle Etagen gebaut";
+  if(S.life>34)return "Zeitlimit (34 s) überschritten";
+  if(S.fail>28)return "zu viele Fehlversuche (fail "+S.fail.toFixed(1)+" > 28)";
+  if(botMats(b)<BUILD_COST)return "kein Material mehr";
+  if(built.size>BUILD_LIMIT*0.97)return "Bauteil-Limit erreicht";
+  return "Sequenz von außen beendet";
+}
+// Vergleicht den Bau-Zustand vor/nach einem Schritt und schreibt Ereignisse ins Log
+function labWatch(b,S,prev){
+  const tag=b.labTag;
+  if(!b.buildUp){
+    const why=labEndReason(b,S), good=why.indexOf("fertig")===0;
+    labLog("ENDE: "+why+" · Etagen "+S.levels+"/"+S.labTotal+" · Bauteile "+built.size+" · "+S.life.toFixed(1)+" s",good?"ok":"bad",tag);
+    b.labLast=S; b.labPrev=null; b.labIdle=true;
+    return;
+  }
+  if(S.phase!==prev.phase)labLog("Phase "+prev.phase+" → "+S.phase,"info",tag);
+  if(S.levels!==prev.levels)labLog("Etage "+S.levels+"/"+S.labTotal+" erreicht (y "+b.pos.y.toFixed(1)+")"+(S.levels%2===0?" · 90°-Drehung":""),"ok",tag);
+  if(S.fail>prev.fail+0.01)labLog("Fehlversuch: fail "+prev.fail.toFixed(2)+" → "+S.fail.toFixed(2)+" (Phase "+S.phase+", y "+b.pos.y.toFixed(1)+")","bad",tag);
+  prev.phase=S.phase; prev.levels=S.levels; prev.fail=S.fail;
+}
+function labDrive(b,other,dt){
+  const L=LAB;
+  b.building=false;
+  if(b.pieceShownT>0)b.pieceShownT-=dt;
+  b.moveDir=new THREE.Vector3(); b.speed=0;
+  if(b.cool>0)b.cool-=dt;
+  if(b.swing>0)b.swing-=dt;
+  if(b.jumpCD>0)b.jumpCD-=dt;
+  if(b.boxOutT>0)b.boxOutT-=dt;
+  b.hp=100; b.sh=0;
+  labRefill(b,false);
+  const S=b.buildUp;
+  if(S){
+    b.labIdle=false; b.speed=5.2;
+    let to;
+    if(L.mode==="fight"&&other){
+      to=new THREE.Vector3(other.pos.x-b.pos.x,0,other.pos.z-b.pos.z);
+      if(to.lengthSq()<0.01)to.set(Math.cos(S.ang),0,Math.sin(S.ang));
+      to.normalize();
+      botAim(b,dt,new THREE.Vector3(other.pos.x,other.pos.y+1.1,other.pos.z));   // wie in botFight(): erst zielen, dann bauen
+    } else {
+      to=new THREE.Vector3(Math.cos(S.ang),0,Math.sin(S.ang));
+      b.pitch=lerp(b.pitch,-0.12,clamp(dt*6,0,1));
+    }
+    if(!b.labPrev)b.labPrev={phase:S.phase,levels:S.levels,fail:S.fail};
+    botBuildFightStep(b,dt,to);
+    labWatch(b,S,b.labPrev);
+  } else b.labIdle=true;
+  finishBotFrame(b,dt);
+  // Auffaelligkeiten, die im Match nur "still" passieren wuerden
+  if(S&&b.buildUp){
+    if(b.stuck>0.7&&!b.labStuckLogged){ b.labStuckLogged=true; labLog("steckt fest (stuck "+b.stuck.toFixed(2)+") → springt / schlägt sich frei","warn",b.labTag); }
+    if(b.stuck<0.2)b.labStuckLogged=false;
+    if(b.forceT>0&&!b.labForce){ b.labForce=true; labLog("Watchdog: Zwangsbewegung ausgelöst (Bot kam nicht voran)","warn",b.labTag); }
+    if(b.forceT<=0)b.labForce=false;
+  }
+}
+function updateLab(dt){
+  const L=LAB, A=L.bot, B=L.foe;
+  if(!A||!B||dt<=0)return;
+  L.simT+=dt;
+  if(A.buildUp||B.buildUp)L.runT+=dt;
+  const pairs=[[A,B],[B,A]];
+  for(let i=0;i<2;i++){
+    const b=pairs[i][0];
+    try{ labDrive(b,pairs[i][1],dt); }
+    catch(err){
+      tickError(err);
+      const st=(err&&err.stack)?String(err.stack).split("\n").slice(1,3).map(s=>s.trim()).join(" | "):"";
+      labLog("FEHLER: "+(err&&err.message?err.message:err)+(st?"  ["+st+"]":""),"bad",b.labTag);
+      b.buildUp=null; b.labIdle=true; b.labPrev=null;   // wie im Match: Fehler beendet die Sequenz
+    }
+  }
+  L.runningNow=!!(A.buildUp||B.buildUp);
+  if(collapseCD>0)collapseCD-=dt;
+  if(collapseT>0){ collapseT-=dt; if(collapseT<=0&&collapseCD<=0)runCollapse(); }
+}
+// Simulationszeit: Pause / Zeitlupe / Einzelschritt
+function labStepDt(dt){
+  if(LAB.stepReq>0){ LAB.stepReq--; return 1/60; }
+  return dt*LAB.ts;
+}
+// Aus placePiece() aufgerufen: jedes Bauteil der Lab-Bots landet mit Ergebnis im Log
+function labLogPlace(e,t,ok){
+  let txt=(PIECE_NAME[t.type]||t.type)+"  "+t.key;
+  if(ok){ labLog("✓ "+txt,"ok",e.labTag); return; }
+  let why="?";
+  if(built.has(t.key))why="Platz schon belegt";
+  else if(e.mats[e.matSel]<BUILD_COST)why="kein Material";
+  else if(!hasSupport(t))why="keine Stütze";
+  const c=cellOf(e.pos.x,e.pos.y,e.pos.z);
+  labLog("✗ "+txt+" — "+why+"  (Bot y "+e.pos.y.toFixed(1)+", Zelle "+c.cx+","+c.cy+","+c.cz+")","bad",e.labTag);
+}
+
+/* ---------- Kamera ---------- */
+function labCamera(dt){
+  const L=LAB, b=L.bot; if(!b)return;
+  if(L.cam==="bot"){ applyThirdPerson(b,dt); return; }
+  const tx=b.pos.x, ty=b.pos.y+1.6, tz=b.pos.z;
+  if(!L.ot)L.ot=new THREE.Vector3(tx,ty,tz);
+  const k=1-Math.pow(.0005,dt);
+  L.ot.x+=(tx-L.ot.x)*k; L.ot.y+=(ty-L.ot.y)*k; L.ot.z+=(tz-L.ot.z)*k;
+  const O=L.orbit, cp=Math.cos(O.pitch), sp=Math.sin(O.pitch);
+  camera.position.set(L.ot.x+Math.sin(O.yaw)*cp*O.dist, L.ot.y+sp*O.dist, L.ot.z+Math.cos(O.yaw)*cp*O.dist);
+  camera.lookAt(L.ot);
+}
+function labToggleCam(){ LAB.cam=LAB.cam==="orbit"?"bot":"orbit"; labSyncButtons(); }
+function labXray(on){
+  LAB.xray=!!on;
+  for(const m of [MAT.wood,MAT.brick,MAT.metal]){
+    m.transparent=!!on; m.opacity=on?.34:1; m.depthWrite=!on; m.needsUpdate=true;
+  }
+  labSyncButtons();
+}
+
+/* ---------- Tempo ---------- */
+function labSetSpeed(v){ LAB.ts=v; labSyncButtons(); }
+function labTogglePause(){
+  if(LAB.ts>0){ LAB.prevTs=LAB.ts; LAB.ts=0; } else LAB.ts=LAB.prevTs||1;
+  labSyncButtons();
+}
+function labStep(){
+  if(LAB.ts>0){ LAB.prevTs=LAB.ts; LAB.ts=0; }
+  LAB.stepReq++; labSyncButtons();
+}
+
+/* ---------- Anzeige ---------- */
+function labSyncButtons(){
+  const L=LAB;
+  document.querySelectorAll("#labPanel [data-sp]").forEach(b=>b.classList.toggle("on",parseFloat(b.dataset.sp)===L.ts));
+  const p=el("labPause"); if(p){ p.classList.toggle("on",L.ts===0); p.textContent=L.ts===0?"▶":"⏸"; }
+  const c=el("labCam"); if(c)c.textContent="Kamera: "+(L.cam==="orbit"?"Orbit":"Bot-Sicht");
+  const x=el("labXray"); if(x)x.classList.toggle("on",L.xray);
+}
+function labStatusText(){
+  const L=LAB, A=L.bot, c=L.cfg; if(!A)return "";
+  const S=A.buildUp||A.labLast;
+  const cell=cellOf(A.pos.x,A.pos.y,A.pos.z);
+  const state=A.buildUp?"läuft":(L.mode?"beendet":"bereit");
+  const modeTxt=L.mode==="tower"?"Turm":L.mode==="fight"?("Baufight (Gegner "+(c.foeMode==="build"?"baut auch":"steht")+")"):"—";
+  const ln=[];
+  ln.push("Modus     "+modeTxt+"  ["+state+"]");
+  ln.push("Zeit      "+L.runT.toFixed(1)+" s    Tempo "+(L.ts===0?"Pause":L.ts+"×"));
+  if(S){
+    ln.push("Phase     "+S.phase+"    Etage "+S.levels+"/"+(S.labTotal||"?")+"    left "+S.left);
+    ln.push("fail      "+S.fail.toFixed(1)+" / 28    life "+S.life.toFixed(1)+" / 34    climbT "+S.climbT.toFixed(1));
+    ln.push("Winkel    "+(((S.ang*180/Math.PI)%360+360)%360).toFixed(0)+"°    Frontwand "+(S.frontWallDir||"–")+"    Box+Dach "+(S.roofed?"ja":"nein"));
+  }
+  ln.push("Bot       x "+A.pos.x.toFixed(1)+"  y "+A.pos.y.toFixed(1)+"  z "+A.pos.z.toFixed(1)+"    Zelle "+cell.cx+","+cell.cy+","+cell.cz);
+  ln.push("          "+(A.onGround?"am Boden":"in der Luft")+"    stuck "+A.stuck.toFixed(2)+"    vy "+A.vel.y.toFixed(1));
+  ln.push("Bauteile  "+built.size+"    Holz "+A.mats.wood+"  Stein "+A.mats.brick+"  Metall "+A.mats.metal);
+  return ln.join("\n");
+}
+function labUI(dt){
+  const L=LAB;
+  L.uiT-=dt;
+  if(L.uiT<=0){
+    L.uiT=0.12;
+    const s=el("labStatus"); if(s)s.textContent=labStatusText();
+  }
+  if(L.logDirty){
+    L.logDirty=false;
+    const box=el("labLog"); if(!box)return;
+    const stick=box.scrollTop+box.clientHeight>=box.scrollHeight-24;
+    let h="";
+    const from=Math.max(0,L.log.length-120);
+    for(let i=from;i<L.log.length;i++){
+      const l=L.log[i];
+      h+='<div class="ll '+l.cls+'"><span class="lt">'+l.t.toFixed(1)+'</span>'+
+         (l.tag?'<span class="lg">'+labEsc(l.tag)+'</span>':'')+labEsc(l.text)+(l.n>1?' <b>×'+l.n+'</b>':'')+'</div>';
+    }
+    box.innerHTML=h;
+    if(stick)box.scrollTop=box.scrollHeight;
+  }
+}
+
+/* ---------- Ein-/Ausstieg ---------- */
+function startLab(){
+  const L=LAB;
+  audioInit(); resumeAudio();
+  SPECTATOR_MODE=false;
+  el("overlay").classList.add("hidden");
+  el("menu").classList.add("hidden");
+  el("endCard").classList.add("hidden");
+  el("hud").classList.remove("hidden");
+  exitSpectateUI();
+  el("feed").innerHTML="";
+  if(world.parent)scene.remove(world);
+  built.clear(); projectiles.length=0; fx.length=0;
+  DIFF=1; KILL_HEAL=false;
+  perfSetMode(el("optQual")?el("optQual").value:"auto");
+  buildLabWorld(); resetPlayer();
+  player.deathPlace=0; player.alive=false;
+  if(player.rig)player.rig.root.visible=false;
+  if(preview&&preview.parent)preview.parent.remove(preview);
+  preview=null;
+  labMakeBots();
+  // kein Sturm im Labor
+  if(storm.mesh)storm.mesh.visible=false;
+  storm.cx=0; storm.cz=0; storm.r=1e6; storm.tr=1e6; storm.state="lab";
+  el("touch").classList.add("hidden");
+  LAB_HIDE.forEach(id=>{ const n=el(id); if(n)n.style.display="none"; });
+  el("labPanel").classList.remove("hidden");
+  L.on=true; L.ts=1; L.prevTs=1; L.stepReq=0; L.cam="orbit"; L.xray=false;
+  L.simT=0; L.log.length=0; L.logDirty=true; L.uiT=0; L.ot=null;
+  camera.fov=75; camera.updateProjectionMatrix();
+  running=true; paused=false; phase="lab";
+  labReset();
+  labLog("Testlabor bereit — „Turm“ oder „Baufight“ drücken","info");
+}
+function labCleanup(toStart){
+  const L=LAB;
+  L.on=false; running=false; phase="menu";
+  labXray(false);
+  bots.forEach(b=>{ if(b.rig&&b.rig.root.parent)b.rig.root.parent.remove(b.rig.root); });
+  bots.length=0; _entDirty=true; L.bot=null; L.foe=null;
+  el("labPanel").classList.add("hidden");
+  LAB_HIDE.forEach(id=>{ const n=el(id); if(n)n.style.display=""; });
+  if(storm.mesh)storm.mesh.visible=true;
+  if(!toStart){
+    el("hud").classList.add("hidden");
+    el("overlay").classList.remove("hidden");
+    el("menu").classList.remove("hidden");
+  }
+}
+function exitLab(){ labCleanup(false); }
+
+/* ---------- Eingabe ---------- */
+function labKey(e){
+  if(e.ctrlKey||e.metaKey||e.altKey)return;
+  const c=e.code, O=LAB.orbit;
+  if(c==="Escape"){ exitLab(); return; }
+  if(c==="Period"||c==="NumpadDecimal"){ labStep(); e.preventDefault(); return; }
+  if(e.repeat)return;
+  if(c==="Digit1"||c==="KeyT"){ labStart("tower"); }
+  else if(c==="Digit2"||c==="KeyB"){ labStart("fight"); }
+  else if(c==="KeyR"){ labReset(); labLog("Reset — Bauteile entfernt, Bots zurückgesetzt","info"); }
+  else if(c==="Space"){ labTogglePause(); e.preventDefault(); }
+  else if(c==="KeyC"){ labToggleCam(); }
+  else if(c==="KeyX"){ labXray(!LAB.xray); }
+  else if(c==="KeyL"){ labCopy(); }
+  else if(c==="Digit3"){ labSetSpeed(.1); }
+  else if(c==="Digit4"){ labSetSpeed(.25); }
+  else if(c==="Digit5"){ labSetSpeed(.5); }
+  else if(c==="Digit6"){ labSetSpeed(1); }
+  else if(c==="ArrowLeft"){ O.yaw+=.18; e.preventDefault(); }
+  else if(c==="ArrowRight"){ O.yaw-=.18; e.preventDefault(); }
+  else if(c==="ArrowUp"){ O.pitch=clamp(O.pitch+.12,.03,1.5); e.preventDefault(); }
+  else if(c==="ArrowDown"){ O.pitch=clamp(O.pitch-.12,.03,1.5); e.preventDefault(); }
+  else if(c==="Equal"||c==="NumpadAdd"){ O.dist=clamp(O.dist*.9,4,120); }
+  else if(c==="Minus"||c==="NumpadSubtract"){ O.dist=clamp(O.dist*1.1,4,120); }
+}
+function labWheel(e){
+  if(e.target&&e.target.closest&&e.target.closest("#labPanel"))return;
+  const O=LAB.orbit; O.dist=clamp(O.dist*(e.deltaY>0?1.1:0.9),4,120);
+}
+function wireLab(){
+  const on=(id,fn)=>{ const n=el(id); if(n)n.addEventListener("click",()=>{ fn(); n.blur&&n.blur(); }); };
+  on("labTower",()=>labStart("tower"));
+  on("labFight",()=>labStart("fight"));
+  on("labReset",()=>{ labReset(); labLog("Reset — Bauteile entfernt, Bots zurückgesetzt","info"); });
+  on("labExit",exitLab);
+  on("labPause",labTogglePause);
+  on("labStep",labStep);
+  on("labCam",labToggleCam);
+  on("labXray",()=>labXray(!LAB.xray));
+  on("labCopy",labCopy);
+  document.querySelectorAll("#labPanel [data-sp]").forEach(b=>b.addEventListener("click",()=>{ labSetSpeed(parseFloat(b.dataset.sp)); b.blur(); }));
+  const sel=(id,key,after)=>{ const n=el(id); if(!n)return;
+    n.addEventListener("change",()=>{ LAB.cfg[key]=n.value; if(after)after(); n.blur&&n.blur(); }); };
+  sel("labLevel","level",()=>labApplyLevel());
+  sel("labMat","mat",()=>{ if(LAB.bot){ labRefill(LAB.bot,true); labRefill(LAB.foe,true); } });
+  sel("labFoe","foeMode",null);
+  const rng=(id,key,outId,suffix,replace)=>{ const n=el(id); if(!n)return;
+    n.addEventListener("input",()=>{
+      const v=parseInt(n.value,10); LAB.cfg[key]=v;
+      const o=el(outId); if(o)o.textContent=v+suffix;
+      if(replace&&LAB.bot&&!LAB.mode)labPlaceBots();      // solange noch nichts gebaut wurde, Vorschau live nachziehen
+    }); };
+  rng("labFloors","floors","labFloorsV","",false);
+  rng("labAng","ang","labAngV","°",true);
+  rng("labDist","dist","labDistV","",true);
+  const rn=el("labRand");
+  if(rn)rn.addEventListener("change",()=>{ LAB.cfg.rand=rn.checked; if(LAB.bot&&!LAB.mode)labPlaceBots(); });
+  // Orbit-Kamera: Ziehen = drehen, Mausrad / Zwei-Finger-Pinch = zoomen
+  const P=new Map(); let pinch=0;
+  addEventListener("pointerdown",e=>{
+    if(phase!=="lab"||!renderer||e.target!==renderer.domElement)return;
+    P.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    if(P.size===2){ const v=Array.from(P.values()); pinch=Math.hypot(v[0].x-v[1].x,v[0].y-v[1].y); }
+    try{ renderer.domElement.setPointerCapture(e.pointerId); }catch(err){}
+  });
+  addEventListener("pointermove",e=>{
+    const p=P.get(e.pointerId); if(!p||phase!=="lab")return;
+    const dx=e.clientX-p.x, dy=e.clientY-p.y; p.x=e.clientX; p.y=e.clientY;
+    const O=LAB.orbit;
+    if(P.size===1){ O.yaw-=dx*0.0075; O.pitch=clamp(O.pitch+dy*0.0075,0.03,1.5); }
+    else if(P.size===2){
+      const v=Array.from(P.values()), d=Math.hypot(v[0].x-v[1].x,v[0].y-v[1].y);
+      if(pinch>0&&d>0)O.dist=clamp(O.dist*pinch/d,4,120);
+      pinch=d;
+    }
+  });
+  const endP=e=>{ P.delete(e.pointerId); pinch=0; };
+  addEventListener("pointerup",endP); addEventListener("pointercancel",endP);
+  const det=el("labSet"); if(det&&TOUCH)det.removeAttribute("open");
+  labSyncButtons();
+}
+
+/* ======================================================================
    ABLAUF
    ====================================================================== */
 let SPECTATOR_MODE=false;
 function startMatch(spectate){
+  if(LAB.on)labCleanup(true);
   SPECTATOR_MODE=!!spectate;
   audioInit(); resumeAudio(); stormAmbient();
   el("overlay").classList.add("hidden");
@@ -5119,7 +5684,7 @@ function tick(){
   const dt=Math.min(clock.getDelta(),.05);
   GDT=dt;   // fuer zeitbasierte Effekte wie die Minigun-Anlaufzeit
   perfAdapt(dt);
-  try{ simulate(dt); }
+  try{ simulate(phase==="lab"?labStepDt(dt):dt); }
   catch(err){ tickError(err); }        // niemals den Frame abbrechen -> kein Standbild
   try{ drawFrame(dt); }
   catch(err){ tickError(err); }
@@ -5134,6 +5699,7 @@ function tickError(err){
 }
 function simulate(dt){
   if(running&&!paused){
+    if(phase==="lab"){ updateLab(dt); return; }
     if(phase==="drop")updateDrop(dt);
     // _entDirty wird gezielt bei Tod/Spawn gesetzt (siehe kill()) — hier NICHT
     // mehr pauschal jeden Frame erzwingen, sonst bringt der entityList()-Cache nichts.
@@ -5193,7 +5759,8 @@ function updateSunShadow(){
 function drawFrame(dt){
   if(TEX.water){ TEX.water.offset.x=(TEX.water.offset.x+dt*0.012)%1; TEX.water.offset.y=(TEX.water.offset.y+dt*0.008)%1; }
   // Kamera
-  if(phase==="spectate"&&spec.target) applyThirdPerson(spec.target,dt);
+  if(phase==="lab"){ labCamera(dt); labUI(dt); }
+  else if(phase==="spectate"&&spec.target) applyThirdPerson(spec.target,dt);
   else if(player.rig) applyThirdPerson(player,dt);
   updateSunShadow();
   recoil=Math.min(recoil,0.30)*Math.pow(.0009,dt);
@@ -5266,6 +5833,8 @@ function wireMenu(){
   if(el("optQual"))el("optQual").addEventListener("change",e=>perfSetMode(e.target.value));
   el("btnStart").addEventListener("click",()=>{audioInit();resumeAudio();startMatch(false);});
   el("btnSpectate").addEventListener("click",()=>{audioInit();resumeAudio();startMatch(true);});
+  el("btnBotBuild").addEventListener("click",()=>{audioInit();resumeAudio();startLab();});
+  wireLab();
   el("btnAgain").addEventListener("click",()=>{audioInit();resumeAudio();startMatch(false);});
   el("btnResume").addEventListener("click",()=>setPaused(false));
   el("btnEditControls").addEventListener("click",enterEditMode);
@@ -5288,7 +5857,7 @@ function wireMenu(){
   addEventListener("click",e=>{
     if(TOUCH)return;
     if(phase==="spectate"){ if(!e.target.closest("button"))cycleSpec(1); return; }
-    if(running&&!paused&&phase!=="menu"&&phase!=="end"&&renderer&&document.pointerLockElement!==renderer.domElement)lock();
+    if(running&&!paused&&phase!=="menu"&&phase!=="end"&&phase!=="lab"&&renderer&&document.pointerLockElement!==renderer.domElement)lock();
   });
 }
 function showFatalError(err){
