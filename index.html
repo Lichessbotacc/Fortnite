@@ -450,12 +450,13 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
       <select id="labMat"><option value="all" selected>Alle (voll)</option><option value="wood">Holz</option><option value="brick">Stein</option><option value="metal">Metall</option></select>
       <span>Gegner</span>
       <select id="labFoe"><option value="still" selected>Steht still</option><option value="build">Baut auch</option></select>
-      <span>Etagen <b id="labFloorsV">12</b></span><input type="range" id="labFloors" min="4" max="20" value="12" step="1">
+      <span>Etagen <b id="labFloorsV">12</b></span><input type="range" id="labFloors" min="4" max="100" value="12" step="1">
       <span>Richtung <b id="labAngV">0°</b></span><input type="range" id="labAng" min="0" max="355" value="0" step="5">
       <span>Abstand <b id="labDistV">26</b></span><input type="range" id="labDist" min="12" max="40" value="26" step="1">
       <span>Start</span><label class="chk"><input type="checkbox" id="labRand" style="width:auto"> zufällig im Feld</label>
+      <span>Todeskampf</span><label class="chk"><input type="checkbox" id="labDuel" style="width:auto"> beide Bots: Pump + unendlich Minis, kämpfen im Baufight bis einer stirbt</label>
     </div>
-    <div class="labHint">Richtung 0° = +X (rot) · 90° = +Z (blau). Turm = kein Gegner, Baufight = Bot baut Richtung Gegner.</div>
+    <div class="labHint">Richtung 0° = +X (rot) · 90° = +Z (blau). Turm = kein Gegner, Baufight = Bot baut Richtung Gegner. Todeskampf aktiv: Baufight startet stattdessen einen echten Kampf (Schießen + Bauen) mit Pump-Schrotflinte und nachwachsenden Minitränken, ohne Etagen-Limit, bis ein Bot stirbt.</div>
     <div class="labHint labKeys">Tasten: 1/T Turm · 2/B Baufight · R Reset · Leertaste Pause · . Schritt · 3–6 Tempo · C Kamera · X durchsichtig · L Log kopieren · Pfeile/Mausrad = Kamera</div>
   </details>
   <pre id="labStatus"></pre>
@@ -496,8 +497,8 @@ let scene,camera,renderer,clock,sunLight;
 let running=false,paused=false,phase="menu";
 // Bot-Build-Testlabor (siehe Abschnitt "BOT BUILD")
 const LAB={on:false,bot:null,foe:null,mode:null,cells:22,ts:1,prevTs:1,stepReq:0,cam:"orbit",xray:false,
-  runT:0,simT:0,runningNow:false,log:[],logDirty:true,uiT:0,orbit:{yaw:.55,pitch:.42,dist:24},ot:null,
-  cfg:{level:"1",mat:"all",foeMode:"still",floors:12,ang:0,dist:26,rand:false}};
+  runT:0,simT:0,runningNow:false,log:[],logDirty:true,uiT:0,orbit:{yaw:.55,pitch:.42,dist:24},ot:null,duelEnded:false,
+  cfg:{level:"1",mat:"all",foeMode:"still",floors:12,ang:0,dist:26,rand:false,duel:false}};
 const colliders=[], hitMeshes=[];
 let world=new THREE.Group();
 const SENS={v:0.0022};
@@ -2831,7 +2832,7 @@ function updateProjectiles(dt){
 }
 function damage(e,amount,src,head){
   if(!e.alive||amount<=0)return;
-  if(LAB.on&&e.lab)return;          // Lab-Bots sind unverwundbar
+  if(LAB.on&&e.lab&&!(LAB.mode==="fight"&&LAB.cfg.duel))return;   // Lab-Bots sind unverwundbar — außer im Todeskampf
   let left=amount, shieldHit=false;
   if(e.sh>0){const a=Math.min(e.sh,left);e.sh-=a;left-=a;shieldHit=true;}
   e.hp-=left;
@@ -3376,7 +3377,9 @@ function botBuildFightStep(b,dt,to){
     b.buildUp=null; b.buildCD=rnd(1.0,2.6); return;
   }
   const dir=new THREE.Vector3(Math.cos(S.ang),0,Math.sin(S.ang));
-  b.moveDir.copy(dir); b.speed=6.6;                 // die eigene Rampe hochlaufen
+  const toAng=Math.atan2(to.z,to.x);
+  b.moveDir.copy(dir).lerp(to,0.22); if(b.moveDir.lengthSq()>0)b.moveDir.normalize();
+  b.speed=6.6;                 // die eigene Rampe hochlaufen, dabei leicht zum Gegner ziehen
   if(Math.random()<clamp(0.20-b.skill*0.15,0.01,0.20))S.fail+=0.25; // schwache Bots patzen öfter beim Baubattle, aber nicht mehr so hart bestraft
   b.yaw=bYaw(b,Math.atan2(-to.x,-to.z),.14); // Blick bleibt beim Gegner
   b.building=true;
@@ -3393,7 +3396,13 @@ function botBuildFightStep(b,dt,to){
     }
     if(b.pos.y>=S.y0+G*0.75||Math.floor(b.pos.y/G+0.001)>Math.floor(S.y0/G+0.001)){
       S.left--; S.levels++; S.climbT=0; S.y0=b.pos.y;
-      if(S.levels%2===0)S.ang+=Math.PI/2;           // 90er
+      if(S.levels%2===0){
+        // 90er-Drehung: immer zu der Seite, auf der der Gegner gerade steht —
+        // vorher drehte der Bot stur immer gleich rum und baute dadurch oft
+        // vom Gegner weg statt auf ihn zu.
+        let da=toAng-S.ang; da=Math.atan2(Math.sin(da),Math.cos(da));
+        S.ang+=da>=0?Math.PI/2:-Math.PI/2;
+      }
       S.phase="floor";                              // jede Etage bekommt einen Boden
     } else if(S.climbT>0.6&&b.onGround&&b.jumpCD<=0){
       // Fruehzeitig nachspringen statt erst kurz vorm Timeout — auf der
@@ -3407,6 +3416,10 @@ function botBuildFightStep(b,dt,to){
   const c=cellOf(b.pos.x,b.pos.y,b.pos.z);
 
   if(S.phase==="floor"){
+    // Baurichtung sacht Richtung Gegner nachziehen — sonst baut der Bot immer
+    // exakt entlang seines Startwinkels weiter, egal wo der Gegner inzwischen steht.
+    let da=toAng-S.ang; da=Math.atan2(Math.sin(da),Math.cos(da));
+    S.ang+=clamp(da,-0.5,0.5);
     // Boden unter den Fuessen — genau das haben die Bots vorher nie gebaut
     const t=floorTargetAt(c.cx,c.cy,c.cz);
     if(!built.has(t.key))placePiece(b,t);
@@ -5236,7 +5249,14 @@ function labApplyLevel(){
   const lv=LAB_LEVELS[LAB.cfg.level]||LAB_LEVELS["1"];
   for(const b of [LAB.bot,LAB.foe]){
     if(!b)continue;
-    b.skill=lv.skill; b.sensi=lv.sensi; b.builder=clamp(lv.skill*.9,.1,1);
+    // Leichte, pro Bot zufaellige Streuung um die Stufen-Basiswerte — sonst
+    // spielen beide Bots (gleiche Stufe) exakt im Gleichschritt / spiegelverkehrt.
+    const jitter=rnd(.88,1.12);
+    b.skill=clamp(lv.skill*jitter,.1,1.3);
+    b.sensi=clamp(lv.sensi*rnd(.85,1.15),.18,1.05);
+    b.builder=clamp(b.skill*rnd(.72,1.08),.1,1);
+    b.aggr=rnd(.35,1);
+    b.strafe=Math.random()<.5?1:-1; b.strafeT=rnd(.5,1.6);
   }
 }
 // "Full Mats": nicht verfuegbare Materialien bleiben bei 0, die gewaehlten werden immer wieder auf 999 aufgefuellt
@@ -5270,11 +5290,28 @@ function labReset(){
   Array.from(built.values()).forEach(r=>destroyBuild(r,true));
   built.clear();
   collapseT=0; collapseCD=0;
-  L.mode=null; L.runT=0; L.runningNow=false; L.ot=null;
+  L.mode=null; L.runT=0; L.runningNow=false; L.ot=null; L.duelEnded=false;
   labApplyLevel(); labPlaceBots();
   labRefill(L.bot,true); labRefill(L.foe,true);
+  for(const b of [L.bot,L.foe]){
+    b.hp=100; b.sh=0; b.alive=true;
+    if(b.rig){ b.rig.root.rotation.z=0; b.rig.root.position.y=0;
+      if(!b.rig.root.parent)world.add(b.rig.root); }
+  }
   L.foe.rig.root.visible=true;
   labSyncButtons();
+}
+// Todeskampf-Ausruestung: Pump-Schrotflinte (legendaer) + immer wieder
+// aufgefuellte Kleine Schildtraenke, unbegrenzt Schrot-Munition.
+function labDuelGear(b){
+  if(!b.slots[1]||b.slots[1].id!=="pump"){
+    b.slots[1]=makeWeapon(WEAPONS.find(w=>w.id==="pump"),4);
+  }
+  b.ammo.shells=999;
+  if(!b.slots[2]||b.slots[2].kind!=="heal"||b.slots[2].id!=="mini"||b.slots[2].n<=0){
+    b.slots[2]=makeConsumable(CONSUMABLES.find(c=>c.id==="mini"),6);
+  }
+  if(b.sel!==1&&b.sel!==2)b.sel=1;
 }
 
 /* ---------- Sequenzen starten ---------- */
@@ -5286,6 +5323,18 @@ function labStart(mode){
   const fight=mode==="fight";
   B.rig.root.visible=fight;
   const angA=fight?Math.atan2(B.pos.z-A.pos.z,B.pos.x-A.pos.x):c.ang*Math.PI/180;
+  if(fight&&c.duel){
+    // TODESKAMPF: echter Kampf (schießen + bauen) statt der reinen Bau-Routine,
+    // laeuft ohne Etagen-/Zeitlimit, bis ein Bot stirbt.
+    A.buildUp=null; B.buildUp=null;
+    labDuelGear(A); labDuelGear(B);
+    A.target=B; B.target=A;
+    A.lastSeen=B.pos.clone(); B.lastSeen=A.pos.clone(); A.seenT=5; B.seenT=5;
+    const d0=Math.hypot(B.pos.x-A.pos.x,B.pos.z-A.pos.z);
+    labLog("Start: TODESKAMPF — beide mit Pump-Schrotflinte + unendlich Minitränken, Abstand "+d0.toFixed(1)+" — kämpft bis einer stirbt","info");
+    L.runningNow=true;
+    return;
+  }
   // exakt dieselben Startwerte wie der Duell-Aufbau in botFight()
   A.buildUp={ang:angA,phase:"floor",left:c.floors,levels:0,fail:0,life:0,climbT:0,y0:A.pos.y,roofed:false,labTotal:c.floors};
   A.target=fight?B:null;
@@ -5325,6 +5374,10 @@ function labWatch(b,S,prev){
 }
 function labDrive(b,other,dt){
   const L=LAB;
+  if(L.mode==="fight"&&L.cfg.duel){
+    if(!L.duelEnded&&b.alive){ labDuelGear(b); updateBot(b,dt); }
+    return;
+  }
   b.building=false;
   if(b.pieceShownT>0)b.pieceShownT-=dt;
   b.moveDir=new THREE.Vector3(); b.speed=0;
@@ -5364,7 +5417,8 @@ function updateLab(dt){
   const L=LAB, A=L.bot, B=L.foe;
   if(!A||!B||dt<=0)return;
   L.simT+=dt;
-  if(A.buildUp||B.buildUp)L.runT+=dt;
+  const duelActive=L.mode==="fight"&&L.cfg.duel;
+  if(A.buildUp||B.buildUp||(duelActive&&!L.duelEnded))L.runT+=dt;
   const pairs=[[A,B],[B,A]];
   for(let i=0;i<2;i++){
     const b=pairs[i][0];
@@ -5374,9 +5428,17 @@ function updateLab(dt){
       const st=(err&&err.stack)?String(err.stack).split("\n").slice(1,3).map(s=>s.trim()).join(" | "):"";
       labLog("FEHLER: "+(err&&err.message?err.message:err)+(st?"  ["+st+"]":""),"bad",b.labTag);
       b.buildUp=null; b.labIdle=true; b.labPrev=null;   // wie im Match: Fehler beendet die Sequenz
+      if(duelActive)L.duelEnded=true;
     }
   }
-  L.runningNow=!!(A.buildUp||B.buildUp);
+  if(duelActive&&!L.duelEnded&&(!A.alive||!B.alive)){
+    L.duelEnded=true;
+    const winner=A.alive?A:(B.alive?B:null);
+    labLog(winner
+      ? ("ENDE: "+winner.labTag+" ("+winner.name+") gewinnt den Todeskampf nach "+L.runT.toFixed(1)+" s — HP "+winner.hp.toFixed(0)+"/Schild "+winner.sh.toFixed(0))
+      : "ENDE: beide Bots gleichzeitig gefallen","ok");
+  }
+  L.runningNow=duelActive?!L.duelEnded:!!(A.buildUp||B.buildUp);
   if(collapseCD>0)collapseCD-=dt;
   if(collapseT>0){ collapseT-=dt; if(collapseT<=0&&collapseCD<=0)runCollapse(); }
 }
@@ -5438,7 +5500,16 @@ function labSyncButtons(){
   const x=el("labXray"); if(x)x.classList.toggle("on",L.xray);
 }
 function labStatusText(){
-  const L=LAB, A=L.bot, c=L.cfg; if(!A)return "";
+  const L=LAB, A=L.bot, B=L.foe, c=L.cfg; if(!A)return "";
+  if(L.mode==="fight"&&c.duel){
+    const ln=[];
+    ln.push("Modus     TODESKAMPF — Pump + unendlich Minis  ["+(L.duelEnded?"beendet":"läuft")+"]");
+    ln.push("Zeit      "+L.runT.toFixed(1)+" s    Tempo "+(L.ts===0?"Pause":L.ts+"×"));
+    ln.push("Bauer     HP "+A.hp.toFixed(0)+"/100  Schild "+A.sh.toFixed(0)+"/50  "+(A.alive?"lebt":"TOT"));
+    ln.push("Gegner    HP "+B.hp.toFixed(0)+"/100  Schild "+B.sh.toFixed(0)+"/50  "+(B.alive?"lebt":"TOT"));
+    ln.push("Bauteile  "+built.size+"    Holz "+A.mats.wood+"  Stein "+A.mats.brick+"  Metall "+A.mats.metal);
+    return ln.join("\n");
+  }
   const S=A.buildUp||A.labLast;
   const cell=cellOf(A.pos.x,A.pos.y,A.pos.z);
   const state=A.buildUp?"läuft":(L.mode?"beendet":"bereit");
@@ -5587,6 +5658,8 @@ function wireLab(){
   rng("labDist","dist","labDistV","",true);
   const rn=el("labRand");
   if(rn)rn.addEventListener("change",()=>{ LAB.cfg.rand=rn.checked; if(LAB.bot&&!LAB.mode)labPlaceBots(); });
+  const dl=el("labDuel");
+  if(dl)dl.addEventListener("change",()=>{ LAB.cfg.duel=dl.checked; });
   // Orbit-Kamera: Ziehen = drehen, Mausrad / Zwei-Finger-Pinch = zoomen
   const P=new Map(); let pinch=0;
   addEventListener("pointerdown",e=>{
