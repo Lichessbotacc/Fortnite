@@ -292,6 +292,11 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
 .ltag i{display:block;width:66px;height:7px;margin:2px auto 0;background:rgba(0,0,0,.65);border-radius:3px;position:relative;overflow:hidden}
 .ltag u,.ltag s{position:absolute;left:0;height:3px;display:block;text-decoration:none}
 .ltag u{top:0;background:var(--hp)}.ltag s{top:3px;background:var(--sh)}
+#editPanel{position:fixed;left:50%;bottom:150px;transform:translateX(-50%);display:none;gap:8px;align-items:center;z-index:9;pointer-events:auto;
+  background:rgba(8,12,17,.82);border:1px solid var(--line);padding:8px 12px;border-radius:10px;font-family:'Barlow Condensed';font-size:17px;color:var(--dim)}
+#editPanel button{font-family:'Barlow Condensed';font-weight:700;font-size:17px;padding:8px 12px;min-height:40px;background:rgba(111,208,255,.16);color:var(--ink);border:1px solid var(--line);border-radius:8px;letter-spacing:.3px}
+#editPanel button[data-a=ok]{background:#6fd0ff;color:#06121b}
+#editPanel button i{font-style:normal;font-size:11px;opacity:.7;margin-left:5px}
 </style>
 </head>
 <body>
@@ -528,6 +533,10 @@ const LAB={list:[],sel:0,play:false,matchEnded:false,hadPlayer:false,setupOpen:f
 const colliders=[], hitMeshes=[];
 let world=new THREE.Group();
 const SENS={v:0.0022};
+// Einzige Stelle, die die Sensitivität aus dem Menü-Regler liest — so ist
+// garantiert, dass Match UND Bot-Test-Modus (Lab) immer exakt denselben Wert
+// verwenden, egal wo/wann gerade ins Spiel/Play gewechselt wird.
+function syncSens(){ const n=el("optSens"); if(n)SENS.v=0.0022*(n.value/100); }
 let DIFF=1;
 let KILL_HEAL=true;   // Bots bekommen nach einem Kill +Schild/HP — in den Einstellungen abschaltbar
 const el=id=>document.getElementById(id);
@@ -615,7 +624,7 @@ function renderKeysList(){
   html.push("<li><b>"+[BINDS.wall,BINDS.ramp,BINDS.floor,BINDS.roof].map(codeLabel).join(" ")+"</b>Wand / Rampe / Boden / Dach</li>");
   html.push("<li><b>"+codeLabel(BINDS.matCycle)+"</b>Material</li>");
   html.push("<li><b>"+codeLabel(BINDS.drop)+"</b>Abwerfen</li>");
-  html.push("<li><b>"+codeLabel(BINDS.edit)+"</b>Editieren (Wand: Fenster/Tür)</li>");
+  html.push("<li><b>"+codeLabel(BINDS.edit)+"</b>Editieren (Wand/Boden, 9 Felder)</li>");
   html.push("<li><b>"+codeLabel(BINDS.emote)+"</b>Emote</li>");
   html.push("<li><b>"+codeLabel(BINDS.unstuck)+"</b>Freikommen</li>");
   html.push("<li><b>Mausrad</b>Slot / Bauteil</li>");
@@ -706,13 +715,25 @@ function perfAdapt(dt){
   }
 }
 
+/* iPad/iOS Safari killt den WebGL-Context gern bei Speicherdruck (viele
+   Canvas-Texturen + große Welt + laufend neue Bauteile). Ohne Handler bleibt
+   der Canvas dann einfach schwarz stehen — vor allem bei Objekten, die NACH
+   dem Verlust neu erzeugt werden (also genau das, was man gerade baut).
+   Mit den beiden Listenern unten fangen wir das ab, statt schwarz haengen
+   zu bleiben, und laden alle Texturen/Materialien neu. */
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent||"") ||
+  (navigator.platform==="MacIntel" && navigator.maxTouchPoints>1); // iPadOS meldet sich als "Mac"
+let ctxLostAt=0;
 function initGfx(){
   scene=new THREE.Scene();
   scene.background=new THREE.Color(0x8fc4ec);
   scene.fog=new THREE.FogExp2(0xcbe6f3,0.0019);
   camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.08,1400);
-  renderer=new THREE.WebGLRenderer({antialias:!LOWFX,powerPreference:"high-performance",stencil:false});
-  renderer.setPixelRatio(Math.min(devicePixelRatio,LOWFX?1:1.75));
+  renderer=new THREE.WebGLRenderer({antialias:!LOWFX,powerPreference:"high-performance",stencil:false,
+    preserveDrawingBuffer:false,failIfMajorPerformanceCaveat:false});
+  // Auf iOS zusaetzlich die Pixel-Aufloesung deckeln — spart genau das GPU-
+  // Speicherbudget, dessen Ueberschreiten den Context-Verlust ausloest.
+  renderer.setPixelRatio(Math.min(devicePixelRatio,IS_IOS?1:(LOWFX?1:1.75)));
   renderer.setSize(innerWidth,innerHeight);
   if(THREE.sRGBEncoding!==undefined)renderer.outputEncoding=THREE.sRGBEncoding;
   if(THREE.ACESFilmicToneMapping!==undefined){renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.18;}
@@ -722,6 +743,26 @@ function initGfx(){
     renderer.shadowMap.enabled=true;
     renderer.shadowMap.type=THREE.PCFSoftShadowMap;
   }
+  renderer.domElement.addEventListener("webglcontextlost",e=>{
+    e.preventDefault();                // Standardverhalten (Context bleibt tot) verhindern
+    ctxLostAt=performance.now();
+    console.warn("WebGL-Context verloren — versuche Wiederherstellung");
+  },false);
+  renderer.domElement.addEventListener("webglcontextrestored",()=>{
+    // Alle Texturen/Materialien als "dirty" markieren, damit three.js sie
+    // beim naechsten Frame komplett neu auf die GPU laedt statt sie schwarz
+    // (= ohne Textur-Daten) zu belassen.
+    Object.values(TEX).forEach(t=>{ if(t&&t.isTexture)t.needsUpdate=true; });
+    Object.values(MAT).forEach(m=>{ if(m&&m.isMaterial){ m.needsUpdate=true; if(m.map)m.map.needsUpdate=true; } });
+    scene.traverse(o=>{
+      if(o.isMesh&&o.material){
+        const mats=Array.isArray(o.material)?o.material:[o.material];
+        mats.forEach(m=>{ m.needsUpdate=true; if(m.map)m.map.needsUpdate=true; });
+      }
+    });
+    if(typeof feed==="function")feed("Grafik wiederhergestellt");
+    console.warn("WebGL-Context wiederhergestellt");
+  },false);
   document.body.insertBefore(renderer.domElement,document.body.firstChild);
   // Himmelskuppel mit Farbverlauf
   const skyMat=new THREE.ShaderMaterial({side:THREE.BackSide,depthWrite:false,
@@ -1954,7 +1995,7 @@ function placePiece(e,t,silent){
   }
   e.mats[mt]-=BUILD_COST;
   e.pieceShown=t.type; e.pieceShownT=0.9;
-  const rec={grp:grp,cols:cols,type:t.type,mat:mt,key:t.key,hp:hp,maxhp:hp,owner:e,segs:wallSegs,editState:"full"};
+  const rec={grp:grp,cols:cols,type:t.type,mat:mt,key:t.key,hp:hp,maxhp:hp,owner:e,segs:wallSegs,tiles:null,editState:"full"};
   cols.forEach(c=>{c.buildRec=rec;});
   built.set(t.key,rec);
   if(built.size>BUILD_LIMIT){                      // ältestes Bauteil abräumen (FPS-Schutz)
@@ -1971,7 +2012,7 @@ function placePiece(e,t,silent){
 /* ---------- Editieren (Fenster/Tür aus Wänden schneiden, wie in Fortnite) ---------- */
 const EDIT_STATES=["full","window","door","open"];
 function editOpenRows(state){
-  return state==="window"?[1]:state==="door"?[0,1]:state==="open"?[0,1,2]:[];
+  return state==="window"?[3,4,5]:state==="door"?[0,1,2,3,4,5]:state==="open"?[0,1,2,3,4,5,6,7,8]:[];
 }
 function setSegOpen(rec,seg,open){
   // Collider bleibt immer registriert (fuer Treffer/Ziel-Erkennung beim erneuten
@@ -1982,14 +2023,16 @@ function setSegOpen(rec,seg,open){
   if(seg.col)seg.col.noClip=open;
 }
 function applyEditState(rec,state){
+  if(state==="full"&&!rec.tiles){ rec.editState="full"; return; }
+  ensureTiles(rec); if(!rec.tiles)return;
   rec.editState=state;
   const open=editOpenRows(state);
-  rec.segs.forEach((seg,i)=>setSegOpen(rec,seg,open.includes(i)));
+  rec.tiles.forEach((t,i)=>setSegOpen(rec,t,open.includes(i)));
 }
 function cycleEdit(rec){
-  if(!rec||rec.type!=="wall"||!rec.segs)return null;
-  const idx=EDIT_STATES.indexOf(rec.editState||"full");
-  const next=EDIT_STATES[(idx+1)%EDIT_STATES.length];
+  if(!rec||rec.type!=="wall")return null;
+  const cur=rec.editState==="custom"?"full":(rec.editState||"full");
+  const next=EDIT_STATES[(EDIT_STATES.indexOf(cur)+1)%EDIT_STATES.length];
   applyEditState(rec,next);
   return next;
 }
@@ -1998,17 +2041,133 @@ function editTargetFor(e,range){
   if(e===player){ eye=camera.position; dir=new THREE.Vector3(); camera.getWorldDirection(dir); }
   else { eye=new THREE.Vector3(e.pos.x,e.pos.y+1.5,e.pos.z);
     dir=new THREE.Vector3(-Math.sin(e.yaw)*Math.cos(e.pitch||0),Math.sin(e.pitch||0),-Math.cos(e.yaw)*Math.cos(e.pitch||0)); }
+  const ok=r=>r&&(r.type==="wall"||r.type==="floor")&&r.owner===e&&r.grp.parent;
   const h=rayHit(eye.x,eye.y,eye.z,dir.x,dir.y,dir.z,range||6.5);
-  if(h&&h.col&&h.col.buildRec&&h.col.buildRec.type==="wall"&&h.col.buildRec.owner===e)return h.col.buildRec;
+  if(h&&h.col&&ok(h.col.buildRec))return h.col.buildRec;
+  if(e===player){
+    const t=buildTargetFor({yaw:e.yaw,pos:e.pos,piece:"wall"});
+    const r=t&&built.get(t.key);
+    if(ok(r))return r;
+  }
   return null;
 }
+
+/* ---------- Editieren wie in Fortnite: 3x3-Raster, Felder wählen, bestätigen ---------- */
+const EDIT={on:false,rec:null,sel:[],hover:-1,paint:null,ov:null,tiles:[],tp:new Map(),panel:null};
+const _tg={}, _edPlane=new THREE.PlaneGeometry(1,1);
+function tileGeo(kind,r,c){
+  const k=kind+r+c; if(_tg[k])return _tg[k];
+  const g=new THREE.BoxGeometry(1,1,1), uv=g.attributes.uv;
+  for(let i=0;i<uv.count;i++){ const u=uv.getX(i), v=uv.getY(i); uv.setXY(i,(c+u)/3,kind==="floor"?(r+v)/3:v); }
+  return _tg[k]=g;
+}
+// Wand/Boden werden erst beim Editieren in 9 Felder zerlegt (sonst unverändert = weniger Kollisionsboxen)
+function ensureTiles(rec){
+  if(rec.tiles||(rec.type!=="wall"&&rec.type!=="floor"))return;
+  const wall=rec.type==="wall", w=G-.06, mat=matMesh(rec.mat), tiles=[], cols=[];
+  rec.cols.forEach(c=>removeCollider(c));
+  for(let r=0;r<3;r++)for(let c=0;c<3;c++){
+    const m=new THREE.Mesh(tileGeo(rec.type,r,c),mat);
+    if(wall){ m.scale.set(w/3,w/3,.3); m.position.set((c-1)*w/3,(r-1)*w/3,0); }
+    else { m.scale.set(w/3,.34,w/3); m.position.set((c-1)*w/3,0,(r-1)*w/3); }
+    if(!LOWFX){ m.castShadow=true; m.receiveShadow=true; }
+    rec.grp.add(m);
+    const col=addBox(m,null,rec.hp,true); col.buildRec=rec;
+    cols.push(col); tiles.push({mesh:m,col:col,open:false});
+  }
+  rec.cols=cols; rec.tiles=tiles; rec.segs=tiles;
+}
+function editPick(o,d){
+  const rec=EDIT.rec; if(!rec)return -1;
+  const g=rec.grp; g.updateWorldMatrix(true,false);
+  const inv=new THREE.Matrix4().copy(g.matrixWorld).invert();
+  const lo=o.clone().applyMatrix4(inv), ld=d.clone().transformDirection(inv);
+  const wall=rec.type==="wall", w=G-.06;
+  const den=wall?ld.z:ld.y; if(Math.abs(den)<1e-4)return -1;
+  const t=-(wall?lo.z:lo.y)/den; if(t<0)return -1;
+  const x=lo.x+ld.x*t, y=wall?lo.y+ld.y*t:lo.z+ld.z*t;
+  const c=Math.floor((x+w/2)/(w/3)), r=Math.floor((y+w/2)/(w/3));
+  return (c<0||c>2||r<0||r>2)?-1:r*3+c;
+}
+function editStart(){
+  if(EDIT.on)return;
+  const rec=editTargetFor(player,9);
+  if(!rec){ feed("Kein eigenes Bauteil im Blick — Wand/Boden ansehen"); return; }
+  ensureTiles(rec);
+  EDIT.on=true; EDIT.rec=rec; EDIT.sel=rec.tiles.map(t=>t.open); EDIT.hover=-1; EDIT.paint=null;
+  player.build=false; updateHUD();
+  const w=G-.06, wall=rec.type==="wall", ov=new THREE.Group(); EDIT.tiles=[];
+  for(let r=0;r<3;r++)for(let c=0;c<3;c++){
+    const m=new THREE.Mesh(_edPlane,new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.16,depthTest:false,depthWrite:false,side:THREE.DoubleSide}));
+    m.renderOrder=999;
+    if(wall){ m.scale.set(w/3*.93,w/3*.93,1); m.position.set((c-1)*w/3,(r-1)*w/3,0); }
+    else { m.rotation.x=-Math.PI/2; m.scale.set(w/3*.93,w/3*.93,1); m.position.set((c-1)*w/3,.2,(r-1)*w/3); }
+    ov.add(m); EDIT.tiles.push(m);
+  }
+  rec.grp.add(ov); EDIT.ov=ov;
+  editPanelShow(true);
+}
+function editEnd(){
+  if(!EDIT.on)return;
+  EDIT.on=false; if(EDIT.ov&&EDIT.ov.parent)EDIT.ov.parent.remove(EDIT.ov);
+  EDIT.ov=null; EDIT.rec=null; EDIT.paint=null; editPanelShow(false);
+}
+function editConfirm(){
+  if(!EDIT.on)return;
+  const rec=EDIT.rec; let any=false, changed=false;
+  rec.tiles.forEach((t,i)=>{ if(t.open!==EDIT.sel[i])changed=true; setSegOpen(rec,t,EDIT.sel[i]); if(EDIT.sel[i])any=true; });
+  rec.editState=any?"custom":"full";
+  if(changed){ sndBuild(rec.mat,1); feed("Bearbeitet"); }
+  editEnd();
+}
+function editReset(){ if(EDIT.on)EDIT.sel=EDIT.sel.map(()=>false); }
+function editCancel(){ editEnd(); }
+function editToggle(){ if(EDIT.on)editConfirm(); else editStart(); }
+function editUpdate(){
+  if(!EDIT.on)return;
+  const rec=EDIT.rec;
+  if(!rec.grp.parent||!player.alive||player.pos.distanceTo(rec.grp.position)>14){ editEnd(); return; }
+  const dir=new THREE.Vector3(); camera.getWorldDirection(dir);
+  EDIT.hover=editPick(camera.position,dir);
+  if(mouseDown){
+    if(EDIT.hover>=0){ if(EDIT.paint===null)EDIT.paint=!EDIT.sel[EDIT.hover]; EDIT.sel[EDIT.hover]=EDIT.paint; }
+  } else EDIT.paint=null;
+  for(let i=0;i<9;i++){
+    const m=EDIT.tiles[i], s=EDIT.sel[i], h=i===EDIT.hover;
+    m.material.color.setHex(s?0x2fa8ff:(h?0xffe27a:0xffffff));
+    m.material.opacity=s?(h?.8:.62):(h?.5:.16);
+  }
+}
+function editPanelShow(on){
+  let p=EDIT.panel;
+  if(!p){
+    p=EDIT.panel=document.createElement("div"); p.id="editPanel";
+    p.addEventListener("pointerdown",e=>{
+      e.stopPropagation(); const b=e.target.closest("button"); if(!b)return; e.preventDefault();
+      ({ok:editConfirm,reset:editReset,cancel:editCancel})[b.dataset.a]();
+    });
+    document.body.appendChild(p);
+  }
+  if(on)p.innerHTML='<span>Felder wählen</span><button data-a="ok">Bestätigen<i>'+codeLabel(BINDS.edit)+'</i></button><button data-a="reset">Zurücksetzen<i>R</i></button><button data-a="cancel">Abbrechen<i>⌫</i></button>';
+  p.style.display=on?"flex":"none";
+}
+addEventListener("pointerdown",e=>{ if(EDIT.on&&e.pointerType!=="mouse")EDIT.tp.set(e.pointerId,{x:e.clientX,y:e.clientY}); });
+addEventListener("pointerup",e=>{
+  const s=EDIT.tp.get(e.pointerId); EDIT.tp.delete(e.pointerId);
+  if(!EDIT.on||!s||e.pointerType==="mouse"||!camera)return;
+  if(Math.hypot(e.clientX-s.x,e.clientY-s.y)>12)return;
+  if(e.target.closest&&e.target.closest(".tb,button,.slot,#editPanel"))return;
+  const rc=new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(e.clientX/innerWidth*2-1,-(e.clientY/innerHeight)*2+1),camera);
+  const i=editPick(rc.ray.origin,rc.ray.direction);
+  if(i>=0)EDIT.sel[i]=!EDIT.sel[i];
+});
 function damageBuild(rec,dmg){
   rec.hp-=dmg;
   const f=clamp(rec.hp/rec.maxhp,0,1);
   const m=rec.cols[0]&&rec.cols[0].mesh;
   if(m&&m.material&&m.material.color){
-    m.material=m.material.clone();
-    m.material.color.copy(new THREE.Color(matMesh(rec.mat).color)).multiplyScalar(.45+f*.55);
+    if(!rec._own){ m.material=m.material.clone(); rec._own=true; }
+    m.material.color.setRGB(1,1,1).multiplyScalar(.45+f*.55);
   }
   if(rec.hp<=0)destroyBuild(rec);
 }
@@ -2882,6 +3041,7 @@ function kill(e,src){
   if(LAB.on)labKilled(e,src);
   const from=e.pos.clone();
   if(e===player){
+    editEnd();
     player.alive=false;
     player.deathPlace=aliveBots().length+1;
     feed((src&&src.name?src.name:"Der Sturm")+" hat dich ausgeschaltet");
@@ -4507,6 +4667,7 @@ function updatePlay(dt){
   const w=heldWeapon(player);
   player.aiming=mouseRight&&!player.build&&!!w;
   player.building=false;
+  editUpdate();
   const scoped=player.aiming&&w&&w.def.scope;
   const targetFov=player.aiming?(scoped?24:62):75;
   camera.fov=lerp(camera.fov,targetFov,1-Math.pow(.002,dt));
@@ -4564,7 +4725,7 @@ function updatePlay(dt){
   // nicht erst, wenn man versucht abzudruecken.
   if(w&&w.kind==="weapon"&&w.inMag<=0&&player.reloading<=0&&!player.using&&
      player.ammo[w.def.ammo]>0){ startReload(player); }
-  if(mouseDown&&!player.using){
+  if(mouseDown&&!player.using&&!EDIT.on){
     const auto=player.build||!held||held.kind==="pick"||(held.kind==="weapon"&&held.def.auto);
     if(auto||!firedOnce)primary();
     firedOnce=true;
@@ -4642,6 +4803,11 @@ addEventListener("keydown",e=>{
   if(e.code===BINDS.pause){if(running&&!paused)setPaused(true);return;}
   keys[e.code]=true;
   if(!running||paused||phase==="spectate")return;
+  if(EDIT.on){
+    if(e.code==="Enter"){ editConfirm(); return; }
+    if(e.code==="KeyR"||e.code===BINDS.reload){ editReset(); return; }
+    if(e.code==="Backspace"){ editCancel(); e.preventDefault(); return; }
+  }
   if(e.code===BINDS.buildToggle){player.build=!player.build;updateHUD();}
   if(e.code===BINDS.wall){player.build=true;player.piece="wall";updateHUD();}
   if(e.code===BINDS.ramp){player.build=true;player.piece="ramp";updateHUD();}
@@ -4652,12 +4818,7 @@ addEventListener("keydown",e=>{
   if(e.code===BINDS.interact)interact();
   if(e.code===BINDS.unstuck)unstuck();
   if(e.code===BINDS.drop)dropSelected(player);
-  if(e.code===BINDS.edit){
-    const rec=editTargetFor(player);
-    if(rec){ const st=cycleEdit(rec);
-      if(st){ sndBuild(rec.mat,1);
-        feed("Editiert: "+({full:"Ganz",window:"Fenster",door:"Tür",open:"Offen"}[st])); } }
-  }
+  if(e.code===BINDS.edit)editToggle();
   if(e.code===BINDS.emote){player.emoteT=player.emoteT>0?0:4;}
   for(let i=1;i<=6;i++) if(e.code===BINDS["slot"+i]){player.sel=i-1;player.build=false;player.reloading=0;player.using=null;sndSwitch();updateHUD();}
 });
@@ -4860,12 +5021,7 @@ function initTouch(){
     setMatButton();updateHUD();},null);
   hold("tPause",()=>setPaused(true),null);
   hold("tUnstuck",()=>unstuck(),null);
-  hold("tEdit",()=>{
-    const rec=editTargetFor(player);
-    if(rec){ const st=cycleEdit(rec);
-      if(st){ sndBuild(rec.mat,1);
-        feed("Editiert: "+({full:"Ganz",window:"Fenster",door:"Tür",open:"Offen"}[st])); } }
-  },null);
+  hold("tEdit",()=>editToggle(),null);
   hold("tEmote",()=>{player.emoteT=player.emoteT>0?0:4;},null);
   DRAGGABLE_IDS.forEach(id=>{const n=el(id);if(n)makeDraggable(n);});
   applyTouchLayout(); setMatButton();
@@ -5616,6 +5772,12 @@ function labUI(dt){
 
 
 /* ---------- Match-Modus: viele Bots (+ Spieler), Loot-Einstellungen, Fehler-Logs ---------- */
+function labGlInfo(){
+  try{
+    const gl=renderer.getContext();
+    labLog("GPU: "+gl.getParameter(gl.VERSION)+" · maxTex "+gl.getParameter(gl.MAX_TEXTURE_SIZE)+" · Schatten "+(renderer.shadowMap.enabled?"an":"aus")+" · LOWFX "+LOWFX+" · Holz-Textur "+(MAT.wood.map&&MAT.wood.map.image?MAT.wood.map.image.width+"px":"FEHLT")+" · Sens "+SENS.v.toFixed(4),"info");
+  }catch(e){ labLog("GPU-Info nicht lesbar: "+e,"warn"); }
+}
 function labLive(){ return (LAB.mode==="fight"&&LAB.cfg.duel)||LAB.mode==="match"; }
 function labGear(e){
   const c=LAB.cfg;
@@ -5671,8 +5833,9 @@ function labSetPlay(on){
   LAB_HIDE.forEach(id=>{ const n=el(id); if(n)n.style.display=keep.indexOf(id)>=0?"none":""; });
   el("labPanel").classList.toggle("hidden",!!on);
   if(TOUCH)el("touch").classList.toggle("hidden",!on);
-  if(on){ paused=false; if(TOUCH){ setMatButton(); applyTouchLayout(); } updateHUD(); lock(); }
+  if(on){ syncSens(); paused=false; if(TOUCH){ setMatButton(); applyTouchLayout(); } updateHUD(); lock(); }
   else {
+    editEnd();
     if(document.pointerLockElement)document.exitPointerLock();
     el("scopeOv").classList.remove("on"); el("prompt").classList.add("hidden");
     camera.fov=75; camera.updateProjectionMatrix();
@@ -5787,7 +5950,7 @@ function startLab(){
   el("feed").innerHTML="";
   if(world.parent)scene.remove(world);
   built.clear(); projectiles.length=0; fx.length=0;
-  DIFF=1; KILL_HEAL=false;
+  DIFF=1; KILL_HEAL=false; syncSens();
   perfSetMode(el("optQual")?el("optQual").value:"auto");
   buildLabWorld(); resetPlayer();
   player.deathPlace=0; player.alive=false;
@@ -5806,7 +5969,7 @@ function startLab(){
   camera.fov=75; camera.updateProjectionMatrix();
   running=true; paused=false; phase="lab";
   labReset();
-  labLog("Testlabor bereit — „Turm“ oder „Baufight“ drücken","info");
+  labGlInfo(); labLog("Testlabor bereit — „Turm“ oder „Baufight“ drücken","info");
 }
 function labCleanup(toStart){
   const L=LAB;
@@ -5875,6 +6038,9 @@ function wireLab(){
   on("labSetupBtn",()=>{ LAB.setupOpen=!LAB.setupOpen; });
   on("labFilter",()=>{ LAB.onlyBad=!LAB.onlyBad; LAB.logDirty=true; labSyncButtons(); });
   on("btnLabQuit",()=>{ paused=false; el("pause").classList.add("hidden"); labReset(); labLog("Match beendet — zurück im Labor","info"); });
+  ["error","warn"].forEach(k=>{ const o=console[k]; console[k]=function(){
+    try{ if(LAB.on)labLog("console."+k+": "+Array.prototype.slice.call(arguments).map(String).join(" ").slice(0,300),k==="error"?"bad":"warn"); }catch(err){}
+    return o.apply(console,arguments); }; });
   addEventListener("error",ev=>{ if(LAB.on)labLog("JS-FEHLER: "+ev.message+" ("+String(ev.filename||"").split("/").pop()+":"+ev.lineno+")","bad"); });
   addEventListener("unhandledrejection",ev=>{ if(LAB.on)labLog("Promise-Fehler: "+(ev.reason&&ev.reason.message?ev.reason.message:ev.reason),"bad"); });
   [["labW1","ar",1],["labW2","pump",1]].forEach(a=>{ const n=el(a[0]);
@@ -5935,6 +6101,7 @@ function wireLab(){
    ====================================================================== */
 let SPECTATOR_MODE=false;
 function startMatch(spectate){
+  editEnd();
   if(LAB.on)labCleanup(true);
   SPECTATOR_MODE=!!spectate;
   audioInit(); resumeAudio(); stormAmbient();
@@ -5949,7 +6116,7 @@ function startMatch(spectate){
   DIFF=parseFloat(el("optDiff").value);
   KILL_HEAL=el("optKillHeal")?el("optKillHeal").checked:true;
   perfSetMode(el("optQual")?el("optQual").value:"auto");
-  SENS.v=0.0022*(el("optSens").value/100);
+  syncSens();
   buildWorld(); initStorm(); resetPlayer();
   player.deathPlace=0;
   if(preview&&preview.parent)preview.parent.remove(preview);
@@ -5971,6 +6138,7 @@ function startMatch(spectate){
   }
 }
 function endMatch(win,winnerBot){
+  editEnd();
   running=false; phase="end";
   exitSpectateUI();
   el("touch").classList.add("hidden");
@@ -6130,6 +6298,7 @@ function wireMenu(){
   ["optBots","optDiff","optSens","optQual","optKillHeal"].forEach(id=>{
     const n=el(id); if(n)n.addEventListener("change",savePrefs);
   });
+  el("optSens").addEventListener("input",syncSens);
   if(el("optCtrl")){
     el("optCtrl").value=CTRL_SCHEME;
     el("optCtrl").addEventListener("change",e=>{
