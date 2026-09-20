@@ -139,6 +139,7 @@ canvas{display:block;touch-action:none}
   background:rgba(200,230,255,.3);border:2px solid rgba(255,255,255,.5)}
 .joybase{position:absolute;width:132px;height:132px;border-radius:50%;display:none;
   border:2px solid rgba(200,230,255,.35);background:rgba(255,255,255,.05);pointer-events:none}
+.joybase.editable{pointer-events:auto}
 .joybase i{position:absolute;left:50%;top:50%;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;
   background:rgba(200,230,255,.3);border:2px solid rgba(255,255,255,.5);transition:transform .04s linear}
 #stickL{left:22px;bottom:22px}
@@ -4338,9 +4339,16 @@ function updatePlay(dt){
   // dreht die Kamera kontinuierlich (Rate pro Sekunde), nicht per Delta wie
   // beim Wischen. Je weiter ausgelenkt, desto schneller die Drehung.
   if(CTRL_SCHEME==="new"&&(stickRVec.x||stickRVec.y)){
-    const rate=2.6*(SENS.v/0.0022)*(player.aiming?.6:1);
-    player.yaw-=stickRVec.x*rate*dt;
-    player.pitch-=stickRVec.y*rate*dt*0.82;
+    // Deadzone gegen Drift + eine Kurve (staerker als linear), damit kleine
+    // Auslenkungen fein/langsam sind und nur eine volle Auslenkung wirklich
+    // schnell dreht — vorher war das 1:1 linear und bei kleinster Beruehrung
+    // schon viel zu schnell/zappelig, kaum kontrollierbar.
+    const dz=0.14, curve=v=>{ const a=Math.abs(v); if(a<dz)return 0;
+      const n=(a-dz)/(1-dz); return Math.sign(v)*Math.pow(n,1.7); };
+    const cx=curve(stickRVec.x), cy=curve(stickRVec.y);
+    const rate=1.5*(SENS.v/0.0022)*(player.aiming?.6:1);
+    player.yaw-=cx*rate*dt;
+    player.pitch-=cy*rate*dt*0.82;
     player.pitch=clamp(player.pitch,-1.35,1.25);
   }
   const w=heldWeapon(player);
@@ -4566,15 +4574,19 @@ const LAYOUT_KEY="sturmfeld_touch_layout_v2";
 // im "alten" Schema seine Buttons anders hinlegt, soll das im "neuen" Schema
 // (mit den beiden festen Sticks in den unteren Ecken) nicht durcheinanderbringen.
 function layoutKey(){ return CTRL_SCHEME==="new" ? LAYOUT_KEY+"_sticks" : LAYOUT_KEY; }
-const DRAGGABLE_IDS=["tFire","tAds","tJump","tBuild","tUse","tReload","tMat","tPause","tUnstuck","tEmote","tBuildPieces","tEdit"];
+const DRAGGABLE_IDS=["tFire","tAds","tJump","tBuild","tUse","tReload","tMat","tPause","tUnstuck","tEmote","tBuildPieces","tEdit","stickL","stickR","bottom"];
 // Sinnvolle Default-Platzierung fuer das "new"-Schema, damit die Action-Buttons
 // nicht einfach auf den beiden festen Sticks in den unteren Ecken landen —
 // wird nur verwendet, solange der Spieler dafuer noch nichts eigenes gespeichert hat.
+// Wichtig: linker Stick jetzt bewusst NICHT mehr in der absoluten Ecke, wo
+// vorher die Waffen-Leiste (#bottom) drunter/drueber lag — beide sind jetzt
+// ausserdem frei verschiebbar, das hier sind nur die Ausgangspositionen.
 const NEW_SCHEME_DEFAULTS={
   tFire:{l:76,t:52}, tAds:{l:63,t:63}, tJump:{l:88,t:38},
   tBuild:{l:70,t:30}, tUse:{l:55,t:70}, tReload:{l:90,t:66},
   tMat:{l:76,t:78}, tPause:{l:3,t:3}, tUnstuck:{l:3,t:14},
-  tEmote:{l:3,t:25}, tEdit:{l:3,t:36}, tBuildPieces:{l:50,t:62}
+  tEmote:{l:3,t:25}, tEdit:{l:3,t:36}, tBuildPieces:{l:50,t:62},
+  stickL:{l:4,t:70}, stickR:{l:80,t:70}, bottom:{l:3,t:44}
 };
 function loadLayout(){ try{return JSON.parse(localStorage.getItem(layoutKey())||"{}");}catch(e){return {};} }
 function saveLayoutEntry(id,l,t){ const L=loadLayout(); L[id]={l:l,t:t}; try{localStorage.setItem(layoutKey(),JSON.stringify(L));}catch(e){} }
@@ -4645,11 +4657,15 @@ function enterEditMode(){
   const t=el("touch"); t.classList.remove("hidden"); t.classList.add("on");
   applyTouchLayout(); editMode=true; el("editBar").classList.remove("hidden");
   const bp=el("tBuildPieces"); if(bp)bp.style.display="flex";
+  // Sticks nur greifbar (pointer-events) machen, waehrend man aktiv Buttons
+  // verschiebt — sonst wuerden sie im normalen Spiel Beruehrungen abfangen.
+  el("stickL").classList.add("editable"); el("stickR").classList.add("editable");
 }
 function exitEditMode(){
   editMode=false; el("editBar").classList.add("hidden");
   const bp=el("tBuildPieces"); if(bp)bp.style.display="none";
   el("touch").classList.add("hidden"); el("overlay").classList.remove("hidden");
+  el("stickL").classList.remove("editable"); el("stickR").classList.remove("editable");
 }
 function setDynLabel(id,text){ const n=el(id); const b=n&&n.querySelector("b"); if(b)b.textContent=text; }
 const MATCOL={wood:"#c98a46",brick:"#b4715a",metal:"#8fa0ad"};
