@@ -525,7 +525,7 @@ const angLerp=(a,b,t)=>{let d=((b-a+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-
 // Sensitivitaet (b.sensi) — verhindert ruckartiges Snappen und sorgt dafuer,
 // dass sich langsame und schnelle Bots spuerbar unterschiedlich anfuehlen.
 function bYaw(b,target,rate){ return angLerp(b.yaw,target,clamp(rate*(b.sensi||1),0,.9)); }
-const MAP=900, HALF=MAP/2, G=3.8;   // Baugröße spürbar verkleinert, naeher an Fortnites Proportionen
+const MAP=900, HALF=MAP/2, G=4.8;   // Baugröße: Verhältnis Wand-zu-Spieler wie im Original (~2.7:1 bei PH=1.8)
 const PR=0.42, PH=1.8, EYE=1.62;
 
 let scene,camera,renderer,clock,sunLight;
@@ -1882,7 +1882,15 @@ function buildTargetFor(e){
     // aktuellen Treppenstufe, soll die nächste Rampe daran anschließen statt
     // wegen Physik-Jitter eine Etage zu tief (= "verbindet nicht") anzusetzen.
     const yBias = piece==="ramp" ? G*0.22 : 0.001;
-    const c=cellOf(fx,e.pos.y+yBias,fz);
+    let tx=fx, tz=fz, ty=e.pos.y+yBias;
+    // Boden als "Deckel": schaut man steil nach oben (>~24°), zielt der Boden
+    // auf die Zelle GENAU ÜBER dem eigenen Standpunkt statt schräg davor —
+    // so lässt sich eine 1x1-Box wie im Original von innen nach oben
+    // abschließen (Kopf in den Nacken legen + Boden bauen = Deckel).
+    if(piece==="floor" && (e.pitch||0)>0.42){
+      tx=e.pos.x; tz=e.pos.z; ty=e.pos.y+G;
+    }
+    const c=cellOf(tx,ty,tz);
     t.cx=c.cx;t.cy=c.cy;t.cz=c.cz;
     t.pos=new THREE.Vector3(c.cx*G+G/2, c.cy*G, c.cz*G+G/2);
     if(piece==="floor"){ t.rotY=0; }
@@ -2220,10 +2228,13 @@ function destroyBuild(rec,quiet){
   if(!quiet)scheduleCollapse();
 }
 let collapseT=0, collapseBusy=false, collapseCD=0;
-function scheduleCollapse(){
-  if(collapseBusy)return;            // waehrend der Pruefung nicht neu anstossen
-  if(collapseT<=0)collapseT=0.30;
-}
+// Strukturelle Integrität (Einsturz nicht abgestützter Bauteile) gab es in
+// Fortnite Chapter 1 noch NICHT — die kam erst mit Chapter 2 Season 2 (2020).
+// In Chapter 1 blieb ein Bauteil für immer stehen, auch wenn die Stütze
+// darunter zerstört wurde ("schwebende" Wände/Böden waren normal). Deshalb
+// ist der Einsturz-Mechanismus hier deaktiviert — Original-Verhalten:
+// scheduleCollapse() bewusst als No-Op.
+function scheduleCollapse(){ /* deaktiviert für Chapter-1-Authentizität */ }
 /* Wichtig: diese Pruefung lief frueher bis zu 4x ueber ALLE Bauteile und hat
    sich dabei ueber destroyBuild() endlos selbst neu gestartet — das war die
    Ursache fuer die Standbilder. Jetzt: eine Runde, gesperrt gegen Re-Entry,
@@ -4494,6 +4505,37 @@ function botPathFree(b,dir,dist){
   const x=b.pos.x+dir.x*dist, z=b.pos.z+dir.z*dist;
   return !blocked(x,b.pos.y+0.05,z,PR+0.12,PH*0.7);
 }
+// Bodenhöhe an einer Stelle ermitteln (senkrechter Strahl nach unten) — Basis
+// für die Sturzschaden-Vermeidung der Bots.
+function groundHeightAt(x,z,fromY){
+  const h=rayHit(x,fromY,z,0,-1,0,90);
+  return h?h.y:0;
+}
+// Bots sollen Sturzschaden erkennen und meiden — genau wie ein Spieler
+// instinktiv nicht einfach von einer hohen Wand herunterläuft. Schwelle
+// orientiert sich an FALL_PTS: unter 3 "Etagen" (G) gibt es noch keinen
+// Schaden, ab dort wird es gefährlich. Im Ernstfall (Sturm-Flucht, aktiver
+// Zwangs-Watchdog, aktives Fliehen vor einem Gegner) darf trotzdem gesprungen
+// werden — genau wie ein Spieler im Notfall auch mal ins Risiko geht.
+function botAvoidFallDamage(b,dt){
+  if(!b.onGround||!b.moveDir||b.moveDir.lengthSq()<0.05)return;
+  if(b.forceT>0||b.stormFlee)return;
+  const look=1.4;
+  const fx=b.pos.x+b.moveDir.x*look, fz=b.pos.z+b.moveDir.z*look;
+  const hereY=groundHeightAt(b.pos.x,b.pos.z,b.pos.y+1.2);
+  const aheadY=groundHeightAt(fx,fz,b.pos.y+1.2);
+  if(hereY-aheadY>G*2.5){
+    // Kante erkannt: seitlich ausweichen statt geradeaus runterzulaufen —
+    // gleiche Idee wie bei botAvoid gegen Wände, nur gegen Abgründe.
+    const side=new THREE.Vector3(-b.moveDir.z,0,b.moveDir.x).normalize();
+    const pick=(b.avoidSide||1);
+    const cand=side.clone().multiplyScalar(pick);
+    if(!botPathFree(b,cand,1.1)||groundHeightAt(b.pos.x+cand.x*look,b.pos.z+cand.z*look,b.pos.y+1.2)<hereY-G*1.2){
+      cand.multiplyScalar(-1);   // andere Seite probieren
+    }
+    b.moveDir.copy(cand);
+  }
+}
 function botAvoid(b,dt){
   if(b.noAvoidT>0){ b.noAvoidT-=dt; return; }   // bewusst geradeaus (Bot schlägt sich frei)
   if(!b.moveDir||b.moveDir.lengthSq()<0.001)return;
@@ -4559,6 +4601,7 @@ function finishBotFrame(b,dt){
     b.yaw=bYaw(b,Math.atan2(-b.forceDir.x,-b.forceDir.z),.2);
   }
   if(!b.turtle&&!b.buildUp)botAvoid(b,dt);   // beim Hochbauen nicht ausweichen
+  if(!b.turtle&&!b.buildUp)botAvoidFallDamage(b,dt);   // Abgründe erkennen & meiden
   // Weiche Beschleunigung statt hartem Richtungswechsel — wirkt menschlicher
   // und weniger "robotisch teleportierend" bei schnellen Zielwechseln.
   const tvx=b.moveDir.x*b.speed, tvz=b.moveDir.z*b.speed;
