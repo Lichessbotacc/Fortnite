@@ -2939,6 +2939,7 @@ function startLobby(){
     const rr=LOBBY.r*0.6;
     b.pos.set(Math.cos(a)*rr,421.0,Math.sin(a)*rr);
     b.yaw=a+Math.PI; b.vel.set(0,0,0); b.onGround=true;
+    b.lobbyTx=b.pos.x; b.lobbyTz=b.pos.z; b.lobbyWaitT=rnd(0,3); b.emoteT=0; b.lodSkip=false;
     if(b.rig){ b.rig.chute.visible=false; b.rig.root.visible=true;
       b.rig.root.position.set(b.pos.x,b.pos.y,b.pos.z); b.rig.root.rotation.y=b.yaw; }
   });
@@ -2957,7 +2958,38 @@ function updateLobby(dt){
   const nx=player.pos.x+move.x*4.6*dt, nz=player.pos.z+move.z*4.6*dt;
   if(Math.hypot(nx,nz)<LOBBY.r-1.2){ player.pos.x=nx; player.pos.z=nz; }
   player.pos.y=421.0; player.heldItem=null; setRigWeapon(player.rig,null);
-  if(player.rig){ player.rig.root.position.set(player.pos.x,player.pos.y,player.pos.z); player.rig.root.rotation.y=player.yaw; }
+  player.vel.set(move.x*4.6,0,move.z*4.6);
+  animRig(player,dt);
+  // Bots in der Prelobby: laufen einfach ziellos herum, bleiben gelegentlich
+  // stehen und tanzen (bestehendes Emote-System via emoteT/animRig — NUR
+  // hier in der Prelobby, in der echten Runde bleibt das Bot-Verhalten
+  // unveraendert).
+  bots.forEach(b=>{
+    if(b.state!=="lobby")return;
+    if(b.emoteT>0){
+      b.emoteT-=dt; b.vel.set(0,0,0);
+    } else {
+      const dx=b.lobbyTx-b.pos.x, dz=b.lobbyTz-b.pos.z, d=Math.hypot(dx,dz);
+      if(d<0.6||b.lobbyWaitT>0){
+        b.lobbyWaitT-=dt; b.vel.set(0,0,0);
+        if(b.lobbyWaitT<=0){
+          if(Math.random()<0.45){ b.emoteT=rnd(2.5,5); }
+          else{
+            const a=rnd(0,Math.PI*2), rr=rnd(2,LOBBY.r*0.75);
+            b.lobbyTx=Math.cos(a)*rr; b.lobbyTz=Math.sin(a)*rr;
+            b.lobbyWaitT=rnd(0.4,2.2);
+          }
+        }
+      } else {
+        const sp=1.8;
+        b.vel.set(dx/d*sp,0,dz/d*sp);
+        b.pos.x+=b.vel.x*dt; b.pos.z+=b.vel.z*dt;
+        b.yaw=angLerp(b.yaw,Math.atan2(-b.vel.x,-b.vel.z),0.15);
+      }
+    }
+    b.pos.y=421.0;
+    animRig(b,dt);
+  });
   const left=Math.max(0,LOBBY.dur-LOBBY.t);
   el("prompt").classList.remove("hidden");
   el("prompt").innerHTML="<b>Prelobby</b> — Bus startet in "+Math.ceil(left)+"s";
