@@ -2961,7 +2961,7 @@ function updateLobby(dt){
   const left=Math.max(0,LOBBY.dur-LOBBY.t);
   el("prompt").classList.remove("hidden");
   el("prompt").innerHTML="<b>Prelobby</b> — Bus startet in "+Math.ceil(left)+"s";
-  updateHUD();
+  updateHUD(); drawMapFor(player);
   if(LOBBY.t>=LOBBY.dur)startBus();
 }
 function startBus(){
@@ -2971,8 +2971,13 @@ function startBus(){
   const ang=rnd(0,Math.PI*2);
   const dirx=Math.cos(ang), dirz=Math.sin(ang);
   const perpx=-dirz, perpz=dirx;
-  const off=rnd(-HALF*0.55,HALF*0.55);
-  const range=HALF*1.55;
+  // Range/Offset bewusst NICHT viel groesser als die Karte selbst: vorher
+  // (Range = 1.55x, Offset bis 0.55x) startete/endete der Bus oft weit
+  // ausserhalb der gebauten Welt, ausserhalb der Sichtweite — man sah unten
+  // buchstaeblich nichts, keine Stadt, nur Leere. Jetzt bleibt die Fluglinie
+  // nah an der Karte, der Bus fliegt fast durchgehend ueber sichtbarem Terrain.
+  const off=rnd(-HALF*0.32,HALF*0.32);
+  const range=HALF*1.06;
   BUS.ax=perpx*off-dirx*range; BUS.az=perpz*off-dirz*range;
   BUS.bx=perpx*off+dirx*range; BUS.bz=perpz*off+dirz*range;
   BUS.y=rnd(215,245);
@@ -2985,8 +2990,10 @@ function startBus(){
   scene.add(BUS.mesh);
   phase="bus";
   player.vel.set(0,0,0); player.jumped=false; dropGlide=false;
-  player.pos.set(BUS.ax,BUS.y,BUS.az);
-  player.yaw=Math.atan2(-dirx,-dirz);
+  const startYaw=Math.atan2(-dirx,-dirz);
+  const startPos=busWorld(new THREE.Vector3(BUS.ax,BUS.y,BUS.az),startYaw,2.6,-1.0,0.3);
+  player.pos.copy(startPos);
+  player.yaw=startYaw;
   if(player.rig){player.rig.root.visible=true; player.rig.chute.visible=false;}
   bots.forEach(b=>{
     b.state="waitbus";
@@ -3004,20 +3011,29 @@ function startBus(){
 }
 function makeBusMesh(){
   const g=new THREE.Group();
-  const body=new THREE.Mesh(new THREE.BoxGeometry(3.2,2.6,7.5),MAT.metal);
+  const body=new THREE.Mesh(new THREE.BoxGeometry(2.0,1.7,4.6),MAT.metal);
   g.add(body);
-  const roof=new THREE.Mesh(new THREE.BoxGeometry(2.6,1.2,5.4),M(0x2c3e4a));
-  roof.position.y=1.6; g.add(roof);
-  const balloon=new THREE.Mesh(new THREE.SphereGeometry(2.4,10,8),M(0xd8dde2));
-  balloon.position.y=4.2; g.add(balloon);
-  const wingGeo=new THREE.BoxGeometry(6.4,0.25,1.6);
-  const wingL=new THREE.Mesh(wingGeo,MAT.metal); wingL.position.set(-4.6,0,0); g.add(wingL);
-  const wingR=new THREE.Mesh(wingGeo,MAT.metal); wingR.position.set(4.6,0,0); g.add(wingR);
+  const roof=new THREE.Mesh(new THREE.BoxGeometry(1.7,0.9,3.6),M(0x2c3e4a));
+  roof.position.y=1.15; g.add(roof);
+  const balloon=new THREE.Mesh(new THREE.SphereGeometry(1.7,10,8),M(0xd8dde2));
+  balloon.position.y=3.0; g.add(balloon);
+  const wingGeo=new THREE.BoxGeometry(4.2,0.18,1.1);
+  const wingL=new THREE.Mesh(wingGeo,MAT.metal); wingL.position.set(-2.9,0,0); g.add(wingL);
+  const wingR=new THREE.Mesh(wingGeo,MAT.metal); wingR.position.set(2.9,0,0); g.add(wingR);
   g.traverse(o=>{if(o.isMesh){o.castShadow=false;o.receiveShadow=false;}});
   return g;
 }
 function busPosAt(frac){
   return new THREE.Vector3(lerp(BUS.ax,BUS.bx,frac),BUS.y,lerp(BUS.az,BUS.bz,frac));
+}
+// Weltposition eines lokalen Punkts relativ zum Bus (rotiert um dessen
+// Blickrichtung). Damit hängen Spieler/Bots seitlich NEBEN dem Rumpf (wie am
+// offenen Ausstieg), statt dass die Kamera mitten IM Bus-Mesh steckt — genau
+// das war der Grund fuer "viel zu gross, ich sehe nix": die Kamera saß direkt
+// in den Wänden der Bus-Box.
+function busWorld(center,yaw,lx,ly,lz){
+  const s=Math.sin(yaw), c=Math.cos(yaw);
+  return new THREE.Vector3(center.x+lx*c+lz*s, center.y+ly, center.z-lx*s+lz*c);
 }
 function ejectFromBus(pos,yaw){
   phase="drop"; dropGlide=false; player.vel.set(0,0,0); player.jumped=true;
@@ -3032,13 +3048,15 @@ function updateBus(dt){
   const yaw=Math.atan2(-dirx,-dirz);
   if(BUS.mesh){ BUS.mesh.position.copy(p); BUS.mesh.rotation.y=yaw; }
   if(!player.jumped){
-    player.pos.copy(p); player.vel.set(0,0,0);
-    if(player.rig){ player.rig.root.position.copy(p); player.rig.root.rotation.y=player.yaw; }
+    const rp=busWorld(p,yaw,2.6,-1.0,0.3);   // Stand neben der offenen Tuer, ausserhalb des Rumpfes
+    player.pos.copy(rp); player.vel.set(0,0,0);
+    if(player.rig){ player.rig.root.position.copy(rp); player.rig.root.rotation.y=player.yaw; }
     const left=Math.max(0,BUS.dur-BUS.t);
     el("prompt").classList.remove("hidden");
     el("prompt").innerHTML="<b>Battle Bus</b> — Leertaste/Springen-Knopf zum Absprung ("+Math.ceil(left)+"s)";
-    if(actionDown("jump"))ejectFromBus(p,player.yaw);   // deckt auch den Touch-Sprungknopf ab
+    if(actionDown("jump"))ejectFromBus(rp,player.yaw);   // deckt auch den Touch-Sprungknopf ab
   }
+  let bi=0;
   for(let i=0;i<bots.length;i++){
     const b=bots[i]; if(!b.alive||b.state!=="waitbus")continue;
     if(frac>=b.busJumpT){
@@ -3046,10 +3064,13 @@ function updateBus(dt){
       b.state="drop"; b.vel.set(0,0,0);
       if(b.rig)b.rig.root.visible=true;
     } else if(b.rig){
-      b.rig.root.position.set(p.x,p.y,p.z); b.rig.root.rotation.y=yaw;
+      bi++;
+      const side=(bi%2===0?1:-1), row=Math.ceil(bi/2);
+      const bp=busWorld(p,yaw,-2.6,-1.0-row*0.05,side*0.9*row);
+      b.rig.root.position.copy(bp); b.rig.root.rotation.y=yaw;
     }
   }
-  updateHUD();
+  updateHUD(); drawMapFor(player);
   if(frac>=1){
     // Bus am Ende der Strecke: alle, die noch nicht draussen sind, muessen
     // jetzt raus (genau wie im Original — man wird notfalls rausgeworfen).
@@ -5758,6 +5779,15 @@ function drawMapFor(who){
   mc.strokeStyle="#7ee0ff"; mc.setLineDash([6,5]);
   mc.beginPath(); mc.arc((storm.tx+HALF)*sc,(storm.tz+HALF)*sc,storm.tr*sc,0,6.3); mc.stroke();
   mc.setLineDash([]);
+  if(phase==="bus"&&BUS.active){
+    const frac=clamp(BUS.t/BUS.dur,0,1);
+    const bp=busPosAt(frac);
+    mc.fillStyle="#ffd23f"; mc.strokeStyle="#7a5a00"; mc.lineWidth=1.5;
+    mc.save(); mc.translate((bp.x+HALF)*sc,(bp.z+HALF)*sc);
+    mc.rotate(-Math.atan2(-(BUS.bx-BUS.ax),-(BUS.bz-BUS.az)));
+    mc.beginPath(); mc.moveTo(0,-7); mc.lineTo(5,6); mc.lineTo(-5,6); mc.closePath(); mc.fill(); mc.stroke();
+    mc.restore();
+  }
   mc.fillStyle="#ff5a4d";
   bots.forEach(b=>{ if(b.alive&&b!==who&&b.pos.distanceTo(who.pos)<80){
     mc.beginPath(); mc.arc((b.pos.x+HALF)*sc,(b.pos.z+HALF)*sc,3.4,0,6.3); mc.fill(); } });
