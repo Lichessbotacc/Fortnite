@@ -1813,7 +1813,7 @@ function animRig(e,dt){
 
   // Arme
   let tRs=-1.35,tRe=-0.25,tLs=-1.15,tLe=-0.5,tRy=0,tLy=0.5;
-  if(e.emoteT>0){
+  if(e.emoteT>0&&(e===player||phase==="lobby")){
     const t=rig.walk=performance.now()*0.006;
     tRs=-2.4+Math.sin(t)*0.8; tLs=-2.4-Math.sin(t)*0.8; tRe=-0.2;tLe=-0.2;
     rig.hips.rotation.y=Math.sin(t*0.9)*0.4;
@@ -2939,9 +2939,8 @@ function startLobby(){
     const rr=LOBBY.r*0.6;
     b.pos.set(Math.cos(a)*rr,421.0,Math.sin(a)*rr);
     b.yaw=a+Math.PI; b.vel.set(0,0,0); b.onGround=true;
-    b.lobbyTx=b.pos.x; b.lobbyTz=b.pos.z; b.lobbyWaitT=rnd(0,3); b.emoteT=0; b.lodSkip=false;
-    if(b.rig){ b.rig.chute.visible=false; b.rig.root.visible=true;
-      b.rig.root.position.set(b.pos.x,b.pos.y,b.pos.z); b.rig.root.rotation.y=b.yaw; }
+    b.lobbyTx=b.pos.x; b.lobbyTz=b.pos.z; b.lobbyWaitT=rnd(0,3); b.emoteT=0; b.lodSkip=false; b.lobbyDanceCD=rnd(1,5);
+    if(b.rig){ b.rig.chute.visible=false; b.rig.root.visible=true; animRig(b,0); }
   });
   feed("Prelobby — Match startet gleich");
 }
@@ -2968,13 +2967,25 @@ function updateLobby(dt){
     if(b.state!=="lobby")return;
     if(b.emoteT>0){
       b.emoteT-=dt; b.vel.set(0,0,0);
+      if(b.emoteT<=0){
+        // Tanz vorbei: IMMER als Naechstes ein neues Laufziel setzen, nie
+        // direkt nochmal tanzen — das war der Bug ("jeder tanzt nur noch"):
+        // vorher stand nach dem Tanz sofort wieder d<0.6 (gleicher Fleck),
+        // wodurch pausenlos neu gewuerfelt wurde und es fast immer wieder
+        // Tanzen traf.
+        const a=rnd(0,Math.PI*2), rr=rnd(2,LOBBY.r*0.75);
+        b.lobbyTx=Math.cos(a)*rr; b.lobbyTz=Math.sin(a)*rr;
+        b.lobbyWaitT=0; b.lobbyDanceCD=rnd(5,10);
+      }
     } else {
       const dx=b.lobbyTx-b.pos.x, dz=b.lobbyTz-b.pos.z, d=Math.hypot(dx,dz);
+      if(b.lobbyDanceCD>0)b.lobbyDanceCD-=dt;
       if(d<0.6||b.lobbyWaitT>0){
         b.lobbyWaitT-=dt; b.vel.set(0,0,0);
         if(b.lobbyWaitT<=0){
-          if(Math.random()<0.45){ b.emoteT=rnd(2.5,5); }
-          else{
+          if(b.lobbyDanceCD<=0&&Math.random()<0.4){
+            b.emoteT=rnd(2.5,5);
+          } else {
             const a=rnd(0,Math.PI*2), rr=rnd(2,LOBBY.r*0.75);
             b.lobbyTx=Math.cos(a)*rr; b.lobbyTz=Math.sin(a)*rr;
             b.lobbyWaitT=rnd(0.4,2.2);
@@ -3018,16 +3029,28 @@ function startBus(){
   BUS.dur=len/BUS.speed;
   BUS.t=0; BUS.active=true;
   if(BUS.mesh){scene.remove(BUS.mesh);BUS.mesh=null;}
-  BUS.mesh=makeBusMesh();
+  // Sitzplaetze im Bus: Raster, alle INNEN. Bus wird passend zur Spielerzahl gross gebaut.
+  const nAll=bots.length+1, cols=5, gx=1.15, gz=1.15;
+  const rows=Math.ceil(nAll/cols);
+  BUS.cols=cols; BUS.W=cols*gx+1.6; BUS.L=rows*gz+5; BUS.floorTop=-0.85;
+  const slots=[];
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++)
+    slots.push({x:(c-(cols-1)/2)*gx, z:-BUS.L/2+3.2+r*gz});
+  const pSlot=slots.splice(2,1)[0];            // Spieler: vorne in der Mitte
+  for(let i=slots.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[slots[i],slots[j]]=[slots[j],slots[i]];}
+  player.busSlot=pSlot;
+  bots.forEach((b,i)=>{ b.busSlot=slots[i]; });
+  BUS.mesh=makeBusMesh(BUS.W,BUS.L);
   scene.add(BUS.mesh);
+  camExtra=1;
   phase="bus";
   player.vel.set(0,0,0); player.jumped=false; dropGlide=false;
   const startYaw=Math.atan2(-dirx,-dirz);
-  const startPos=busWorld(new THREE.Vector3(BUS.ax,BUS.y,BUS.az),startYaw,2.6,-1.0,0.3);
-  player.pos.copy(startPos);
-  player.yaw=startYaw;
+  player.pos.set(BUS.ax,BUS.y+BUS.floorTop,BUS.az);
+  player.yaw=startYaw; player.pitch=-0.42;
   if(player.rig){player.rig.root.visible=true; player.rig.chute.visible=false;}
   bots.forEach(b=>{
+    b.emoteT=0;
     b.state="waitbus";
     // Zeitpunkt entlang der Linie, an dem der Bot springt: dort, wo der Bus
     // am naechsten an seinem (schon beim Spawn per POI/Stadt-Bias gewaehlten)
@@ -3041,31 +3064,43 @@ function startBus(){
   });
   feed("Battle Bus — Leertaste zum Absprung");
 }
-function makeBusMesh(){
+function makeBusMesh(W,L){
+  // Offener Bus: Boden + Waende, alle Passagiere stehen INNEN. Front = lokal -z.
   const g=new THREE.Group();
-  const body=new THREE.Mesh(new THREE.BoxGeometry(2.0,1.7,4.6),MAT.metal);
-  g.add(body);
-  const roof=new THREE.Mesh(new THREE.BoxGeometry(1.7,0.9,3.6),M(0x2c3e4a));
-  roof.position.y=1.15; g.add(roof);
-  const balloon=new THREE.Mesh(new THREE.SphereGeometry(1.7,10,8),M(0xd8dde2));
-  balloon.position.y=3.0; g.add(balloon);
-  const wingGeo=new THREE.BoxGeometry(4.2,0.18,1.1);
-  const wingL=new THREE.Mesh(wingGeo,MAT.metal); wingL.position.set(-2.9,0,0); g.add(wingL);
-  const wingR=new THREE.Mesh(wingGeo,MAT.metal); wingR.position.set(2.9,0,0); g.add(wingR);
+  const floor=new THREE.Mesh(new THREE.BoxGeometry(W,0.3,L),MAT.metal);
+  floor.position.y=-1.0; g.add(floor);
+  const wallMat=M(0x3a7fc4), trim=M(0x2c3e4a);
+  const wh=1.25, wy=-0.85+wh/2;
+  const sideGeo=new THREE.BoxGeometry(0.25,wh,L);
+  const wl=new THREE.Mesh(sideGeo,wallMat); wl.position.set(-W/2+0.12,wy,0); g.add(wl);
+  const wr=new THREE.Mesh(sideGeo,wallMat); wr.position.set(W/2-0.12,wy,0); g.add(wr);
+  const endGeo=new THREE.BoxGeometry(W,wh,0.25);
+  const wf=new THREE.Mesh(endGeo,trim); wf.position.set(0,wy,-L/2+0.12); g.add(wf);
+  const wb=new THREE.Mesh(endGeo,trim); wb.position.set(0,wy,L/2-0.12); g.add(wb);
+  // Fahrerkabine vorne (Windschutz)
+  const cab=new THREE.Mesh(new THREE.BoxGeometry(W,1.1,0.2),trim); cab.position.set(0,-0.85+wh+0.55,-L/2+2.0); g.add(cab);
+  // Ballon ueber dem Bus, halbtransparent damit er die Sicht nicht blockiert
+  const bm=new THREE.MeshBasicMaterial({color:0xe6ebf0,transparent:true,opacity:0.55,depthWrite:false});
+  const balloon=new THREE.Mesh(new THREE.SphereGeometry(1,14,10),bm);
+  balloon.scale.set(W*0.75,W*0.7,L*0.42); balloon.position.set(0,W*0.7+5,-L*0.05); g.add(balloon);
+  const ropeMat=M(0x222222);
+  [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([sx,sz])=>{
+    const rope=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,W*0.7+5,4),ropeMat);
+    rope.position.set(sx*W*0.36,(W*0.7+5)/2-0.3,sz*L*0.2-L*0.05); g.add(rope);
+  });
+  const wingGeo=new THREE.BoxGeometry(W*1.2,0.2,2.2);
+  const wingL=new THREE.Mesh(wingGeo,MAT.metal); wingL.position.set(-W*1.0,-0.9,L*0.3); g.add(wingL);
+  const wingR=new THREE.Mesh(wingGeo,MAT.metal); wingR.position.set(W*1.0,-0.9,L*0.3); g.add(wingR);
   g.traverse(o=>{if(o.isMesh){o.castShadow=false;o.receiveShadow=false;}});
   return g;
 }
+function busSlotWorld(sl,yaw){
+  if(!sl)return {x:0,z:0};
+  const c=Math.cos(yaw), sn=Math.sin(yaw);
+  return {x:sl.x*c+sl.z*sn, z:-sl.x*sn+sl.z*c};
+}
 function busPosAt(frac){
   return new THREE.Vector3(lerp(BUS.ax,BUS.bx,frac),BUS.y,lerp(BUS.az,BUS.bz,frac));
-}
-// Weltposition eines lokalen Punkts relativ zum Bus (rotiert um dessen
-// Blickrichtung). Damit hängen Spieler/Bots seitlich NEBEN dem Rumpf (wie am
-// offenen Ausstieg), statt dass die Kamera mitten IM Bus-Mesh steckt — genau
-// das war der Grund fuer "viel zu gross, ich sehe nix": die Kamera saß direkt
-// in den Wänden der Bus-Box.
-function busWorld(center,yaw,lx,ly,lz){
-  const s=Math.sin(yaw), c=Math.cos(yaw);
-  return new THREE.Vector3(center.x+lx*c+lz*s, center.y+ly, center.z-lx*s+lz*c);
 }
 function ejectFromBus(pos,yaw){
   phase="drop"; dropGlide=false; player.vel.set(0,0,0); player.jumped=true;
@@ -3080,35 +3115,43 @@ function updateBus(dt){
   const yaw=Math.atan2(-dirx,-dirz);
   if(BUS.mesh){ BUS.mesh.position.copy(p); BUS.mesh.rotation.y=yaw; }
   if(!player.jumped){
-    const rp=busWorld(p,yaw,2.6,-1.0,0.3);   // Stand neben der offenen Tuer, ausserhalb des Rumpfes
-    player.pos.copy(rp); player.vel.set(0,0,0);
-    if(player.rig){ player.rig.root.position.copy(rp); player.rig.root.rotation.y=player.yaw; }
+    // WICHTIG: Position haengt jetzt rein vertikal unter dem Bus (kein
+    // seitlicher, winkelabhaengiger Versatz mehr noetig) — dadurch kann die
+    // Position NIE relativ zum Bus "wandern" oder falsch rotiert werden, egal
+    // in welche Richtung der Bus fliegt. Und die Blickrichtung/Rotation des
+    // Charaktermodells laeuft jetzt ausschliesslich ueber animRig() — exakt
+    // dieselbe Funktion, die auch sonst im ganzen Spiel fuers Rig zustaendig
+    // ist. Eigene Rotationsformeln waren die Fehlerquelle fuer "dreht sich
+    // irgendwo hin".
+    const bo=busSlotWorld(player.busSlot,yaw);
+    player.pos.set(p.x+bo.x,p.y+BUS.floorTop,p.z+bo.z); player.vel.set(0,0,0);
+    animRig(player,dt);
     const left=Math.max(0,BUS.dur-BUS.t);
     el("prompt").classList.remove("hidden");
     el("prompt").innerHTML="<b>Battle Bus</b> — Leertaste/Springen-Knopf zum Absprung ("+Math.ceil(left)+"s)";
-    if(actionDown("jump"))ejectFromBus(rp,player.yaw);   // deckt auch den Touch-Sprungknopf ab
+    if(actionDown("jump"))ejectFromBus(player.pos.clone(),player.yaw);   // deckt auch den Touch-Sprungknopf ab
   }
-  let bi=0;
   for(let i=0;i<bots.length;i++){
     const b=bots[i]; if(!b.alive||b.state!=="waitbus")continue;
     if(frac>=b.busJumpT){
-      b.pos.set(p.x+rnd(-2,2),p.y,p.z+rnd(-2,2));
+      const bo=busSlotWorld(b.busSlot,yaw);
+      b.pos.set(p.x+bo.x,p.y+BUS.floorTop+0.3,p.z+bo.z);
       b.state="drop"; b.vel.set(0,0,0);
       if(b.rig)b.rig.root.visible=true;
-    } else if(b.rig){
-      bi++;
-      const side=(bi%2===0?1:-1), row=Math.ceil(bi/2);
-      const bp=busWorld(p,yaw,-2.6,-1.0-row*0.05,side*0.9*row);
-      b.rig.root.position.copy(bp); b.rig.root.rotation.y=yaw;
+    } else {
+      const bo=busSlotWorld(b.busSlot,yaw);
+      b.pos.set(p.x+bo.x,p.y+BUS.floorTop,p.z+bo.z);
+      b.yaw=yaw; b.vel.set(0,0,0);
+      animRig(b,dt);
     }
   }
   updateHUD(); drawMapFor(player);
   if(frac>=1){
     // Bus am Ende der Strecke: alle, die noch nicht draussen sind, muessen
     // jetzt raus (genau wie im Original — man wird notfalls rausgeworfen).
-    if(!player.jumped)ejectFromBus(p,player.yaw);
+    if(!player.jumped)ejectFromBus(player.pos.clone(),player.yaw);
     for(let i=0;i<bots.length;i++){ const b=bots[i];
-      if(b.alive&&b.state==="waitbus"){ b.pos.set(p.x+rnd(-2,2),p.y,p.z+rnd(-2,2)); b.state="drop"; b.vel.set(0,0,0); } }
+      if(b.alive&&b.state==="waitbus"){ const bo=busSlotWorld(b.busSlot,yaw); b.pos.set(p.x+bo.x,p.y+BUS.floorTop+0.3,p.z+bo.z); b.state="drop"; b.vel.set(0,0,0); } }
     if(BUS.mesh){scene.remove(BUS.mesh);BUS.mesh=null;} BUS.active=false;
   }
 }
@@ -3682,13 +3725,13 @@ function botDrop(b,dt){
   // blieb also an seiner letzten Position (meist noch am Spawnpunkt / unter der
   // Karte) stehen, waehrend die Logik-Position (b.pos) laengst am Himmel war —
   // dadurch waren abspringende Bots in der Luft praktisch unsichtbar. Fix:
-  // Rig-Root hier jeden Frame explizit auf b.pos ziehen, inkl. Blickrichtung/
-  // Neigung, damit man Bots am Himmel wieder sieht.
+  // ueber animRig() synchronisieren (dieselbe Funktion, die im ganzen Spiel
+  // fuer Position/Blickrichtung des Rigs zustaendig ist — manuelles Setzen von
+  // rig.root.rotation traf das falsche Objekt und sorgte fuer komische Drehungen).
   if(b.rig){
     b.rig.root.visible=true;
-    b.rig.root.position.set(b.pos.x,b.pos.y,b.pos.z);
-    b.rig.root.rotation.y=b.yaw;
     if(b.rig.root.rotation.z)b.rig.root.rotation.z=0;
+    animRig(b,dt);
   }
 }
 function botBestSlot(b){
@@ -4663,10 +4706,8 @@ function botIdle(b,dt,stormDist){
     }
   }
   // Emote wenn alles ruhig
-  if(b.chatT<=0&&b.emoteT<=0&&Math.random()<dt*0.5&&stormDist<-40){
-    b.emoteT=rnd(2,4); b.chatT=rnd(40,120);
-  }
-  if(b.emoteT>0){ b.emoteT-=dt; b.moveDir=new THREE.Vector3(); return; }
+  // Bots tanzen NUR in der Prelobby — hier nie.
+  b.emoteT=0;
   // Nächste Zone schon anlaufen, sobald man außerhalb des kommenden Kreises steht
   const dT=Math.hypot(b.pos.x-storm.tx,b.pos.z-storm.tz);
   if(dT>storm.tr*0.62){
@@ -4945,6 +4986,8 @@ function finishBotFrame(b,dt){
    KAMERA (Third-Person, identisch für Spieler und Zuschauen)
    ====================================================================== */
 const camState={dist:4.4,shoulder:0.72};
+let camExtra=0;                 // 1 = Bus-Kamera (weit weg), faehrt nach dem Absprung sanft auf 0
+const BUS_CAM_DIST=46;
 const CAM_MIN=1.15;       // Sicherheitsabstand: Kamera darf nie näher als das an den Kopf heran
 function applyThirdPerson(e,dt){
   const aim=e.aiming;
@@ -4952,7 +4995,20 @@ function applyThirdPerson(e,dt){
   const wantSh=aim?0.95:0.72;
   camState.dist=lerp(camState.dist,wantDist,1-Math.pow(.002,dt));
   camState.shoulder=lerp(camState.shoulder,wantSh,1-Math.pow(.002,dt));
+  let zoomK=0;
+  if(e===player){
+    if(phase==="bus"&&!player.jumped) camExtra=1;
+    else if(camExtra>0) camExtra=Math.max(0,camExtra-dt/4.5);   // ~4.5s langsames Herauszoomen
+    zoomK=camExtra*camExtra*(3-2*camExtra);                     // smoothstep
+  }
   const target=new THREE.Vector3(e.pos.x,e.pos.y+1.55,e.pos.z);
+  let busDist=BUS_CAM_DIST;
+  if(zoomK>0&&BUS.active&&BUS.mesh){
+    // Fortnite-Style: Kamera kreist um die MITTE des Busses, nicht um den Spieler
+    const bc=BUS.mesh.position;
+    target.set(lerp(target.x,bc.x,zoomK),lerp(target.y,bc.y+1,zoomK),lerp(target.z,bc.z,zoomK));
+    busDist=Math.max(34,BUS.L*0.95+14);
+  }
   camera.rotation.set(0,0,0);
   // WICHTIG: Gesamtneigung hart begrenzen — sonst kippt die Kamera über den Scheitel
   // und man sieht plötzlich das Gesicht statt des Hinterkopfs.
@@ -4960,9 +5016,9 @@ function applyThirdPerson(e,dt){
   camera.rotateY(e.yaw); camera.rotateX(camPitch);
   const dir=new THREE.Vector3(); camera.getWorldDirection(dir);
   const right=new THREE.Vector3(-dir.z,0,dir.x).normalize();
-  const anchor=target.clone().addScaledVector(right,camState.shoulder);
+  const anchor=target.clone().addScaledVector(right,camState.shoulder*(1-zoomK));
   const back=dir.clone().multiplyScalar(-1);
-  const wantDistClamped=Math.max(CAM_MIN,camState.dist);
+  const wantDistClamped=Math.max(CAM_MIN,camState.dist+zoomK*(busDist-camState.dist));
   // Kollisionscheck erst AB dem Mindestabstand starten, damit eigene/umliegende
   // Bauten (z.B. eine Wand direkt hinter dem Rücken) die Kamera nicht bis in den
   // Kopf hineinziehen — sie darf nur zwischen Mindest- und Wunschabstand einfahren.
@@ -6806,6 +6862,7 @@ function tickError(err){
 function simulate(dt){
   if(running&&!paused){
     if(phase==="lab"){ updateLab(dt); if(LAB.play&&player.alive)updatePlay(dt); updateProjectiles(dt); return; }
+    if(phase!=="bus"&&phase!=="lobby"&&BUS.active&&BUS.mesh)updateBus(dt);   // Bus fliegt weiter, bis alle draussen sind
     if(phase==="lobby")updateLobby(dt);
     else if(phase==="bus")updateBus(dt);
     else if(phase==="drop")updateDrop(dt);
