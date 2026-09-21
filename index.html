@@ -92,10 +92,11 @@ canvas{display:block;touch-action:none}
   font-family:'Barlow Condensed';font-size:14px;line-height:1.1;color:var(--dim);overflow:hidden;transition:transform .1s}
 .slot.sel{transform:translateY(-2px)}
 .slot .k{position:absolute;top:3px;left:5px;font-size:11px;color:#6e8395}
-.slot .n{position:absolute;bottom:4px;left:5px;right:5px;color:var(--ink);font-size:14px}
+.slot .n{position:absolute;bottom:4px;left:26px;right:5px;color:var(--ink);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .slot .q{position:absolute;top:3px;right:5px;font-size:13px;color:var(--gold)}
 .slot.sel{border-color:#fff;background:rgba(40,60,80,.85)}
 .slot .r{position:absolute;top:0;left:0;right:0;height:3px}
+.slot .icon{position:absolute;left:4px;bottom:3px;width:19px;height:19px;background-size:contain;background-repeat:no-repeat;background-position:center;pointer-events:none;filter:drop-shadow(0 1px 1px rgba(0,0,0,.6))}
 #ammo{position:fixed;right:18px;bottom:18px;text-align:right;font-family:'Barlow Condensed'}
 #ammo .big{font-size:52px;line-height:.9;letter-spacing:1px}
 #ammo .big em{font-style:normal;color:var(--dim);font-size:28px}
@@ -530,6 +531,11 @@ const PR=0.42, PH=1.8, EYE=1.62;
 
 let scene,camera,renderer,clock,sunLight;
 let running=false,paused=false,phase="menu";
+/* ======================================================================
+   PRELOBBY + BATTLE BUS
+   ====================================================================== */
+const LOBBY={t:0,dur:0,platform:null,r:16};
+const BUS={ax:0,az:0,bx:0,bz:0,y:230,speed:24,dur:0,t:0,mesh:null,active:false};
 // Bot-Build-Testlabor (siehe Abschnitt "BOT BUILD")
 const LAB={list:[],sel:0,play:false,matchEnded:false,hadPlayer:false,setupOpen:false,onlyBad:false,dmgAcc:new Map(),dmgT:0,lastNow:0,spikeAt:0,on:false,bot:null,foe:null,mode:null,cells:30,ts:1,prevTs:1,stepReq:0,cam:"orbit",xray:false,
   runT:0,simT:0,runningNow:false,log:[],logDirty:true,uiT:0,orbit:{yaw:.55,pitch:.42,dist:24},ot:null,duelEnded:false,
@@ -858,7 +864,7 @@ function nearbyR(x,z,r){
   }
   return NEAR;
 }
-function nearby(x,z){ return nearbyR(x,z,1.2); }
+function nearby(x,z){ return nearbyR(x,z,3.0); }
 function addBox(mesh,res,hp,structure,noRay,noClip,hitBox){
   if(mesh.parent)mesh.parent.updateWorldMatrix(true,false);
   mesh.updateWorldMatrix(true,true);
@@ -2901,6 +2907,160 @@ function aliveBots(){return bots.filter(b=>b.alive);}
 function aliveCount(){return aliveBots().length+(player.alive?1:0);}
 
 /* ======================================================================
+   PRELOBBY + BATTLE BUS
+   Ablauf wie im echten Fortnite: erst 10-20s freies Rumlaufen auf einer
+   kleinen Warte-Insel (Prelobby), dann fliegt der Bus auf einer zufaelligen,
+   jedes Match anderen Linie ueber die Karte. Spieler springt selbst per
+   Leertaste ab, Bots springen zeitversetzt und zufaellig (staedtenah)
+   heraus, danach uebernimmt die schon vorhandene Fallschirm-/Gleiter-Logik
+   (updateDrop / botDrop) unveraendert.
+   ====================================================================== */
+function buildLobbyPlatform(){
+  const g=new THREE.Group();
+  const floor=new THREE.Mesh(new THREE.CylinderGeometry(LOBBY.r,LOBBY.r,1,28),MAT.metal);
+  floor.position.y=-0.5; g.add(floor);
+  const rail=new THREE.Mesh(new THREE.TorusGeometry(LOBBY.r-0.4,0.12,8,28),MAT.metal);
+  rail.rotation.x=Math.PI/2; rail.position.y=1.1; g.add(rail);
+  g.position.set(0,420,0);
+  scene.add(g);
+  LOBBY.platform=g;
+}
+function startLobby(){
+  if(LOBBY.platform){scene.remove(LOBBY.platform);LOBBY.platform=null;}
+  buildLobbyPlatform();
+  LOBBY.t=0; LOBBY.dur=rnd(10,20);
+  phase="lobby";
+  player.pos.set(0,421.0,0); player.vel.set(0,0,0); player.onGround=true;
+  player.yaw=rnd(0,6.28); player.pitch=0;
+  if(player.rig){player.rig.chute.visible=false; player.rig.root.position.set(player.pos.x,player.pos.y,player.pos.z);}
+  bots.forEach((b,i)=>{
+    b.state="lobby";
+    const a=(i/Math.max(1,bots.length))*Math.PI*2;
+    const rr=LOBBY.r*0.6;
+    b.pos.set(Math.cos(a)*rr,421.0,Math.sin(a)*rr);
+    b.yaw=a+Math.PI; b.vel.set(0,0,0); b.onGround=true;
+    if(b.rig){ b.rig.chute.visible=false; b.rig.root.visible=true;
+      b.rig.root.position.set(b.pos.x,b.pos.y,b.pos.z); b.rig.root.rotation.y=b.yaw; }
+  });
+  feed("Prelobby — Match startet gleich");
+}
+function updateLobby(dt){
+  LOBBY.t+=dt;
+  const f=new THREE.Vector3(-Math.sin(player.yaw),0,-Math.cos(player.yaw));
+  const r=new THREE.Vector3(-f.z,0,f.x);
+  const move=new THREE.Vector3();
+  if(actionDown("forward"))move.add(f); if(actionDown("back"))move.sub(f);
+  if(actionDown("right"))move.add(r); if(actionDown("left"))move.sub(r);
+  if(move.lengthSq())move.normalize();
+  move.addScaledVector(f,touchMove.y).addScaledVector(r,touchMove.x);
+  if(move.length()>1)move.normalize();
+  const nx=player.pos.x+move.x*4.6*dt, nz=player.pos.z+move.z*4.6*dt;
+  if(Math.hypot(nx,nz)<LOBBY.r-1.2){ player.pos.x=nx; player.pos.z=nz; }
+  player.pos.y=421.0; player.heldItem=null; setRigWeapon(player.rig,null);
+  if(player.rig){ player.rig.root.position.set(player.pos.x,player.pos.y,player.pos.z); player.rig.root.rotation.y=player.yaw; }
+  const left=Math.max(0,LOBBY.dur-LOBBY.t);
+  el("prompt").classList.remove("hidden");
+  el("prompt").innerHTML="<b>Prelobby</b> — Bus startet in "+Math.ceil(left)+"s";
+  updateHUD();
+  if(LOBBY.t>=LOBBY.dur)startBus();
+}
+function startBus(){
+  if(LOBBY.platform){scene.remove(LOBBY.platform);LOBBY.platform=null;}
+  // Zufaellige Linie ueber die Karte, jedes Match anders, garantiert die
+  // gesamte Insel querend (Streckenlaenge deutlich groesser als die Diagonale).
+  const ang=rnd(0,Math.PI*2);
+  const dirx=Math.cos(ang), dirz=Math.sin(ang);
+  const perpx=-dirz, perpz=dirx;
+  const off=rnd(-HALF*0.55,HALF*0.55);
+  const range=HALF*1.55;
+  BUS.ax=perpx*off-dirx*range; BUS.az=perpz*off-dirz*range;
+  BUS.bx=perpx*off+dirx*range; BUS.bz=perpz*off+dirz*range;
+  BUS.y=rnd(215,245);
+  BUS.speed=24;
+  const len=Math.hypot(BUS.bx-BUS.ax,BUS.bz-BUS.az);
+  BUS.dur=len/BUS.speed;
+  BUS.t=0; BUS.active=true;
+  if(BUS.mesh){scene.remove(BUS.mesh);BUS.mesh=null;}
+  BUS.mesh=makeBusMesh();
+  scene.add(BUS.mesh);
+  phase="bus";
+  player.vel.set(0,0,0); player.jumped=false; dropGlide=false;
+  player.pos.set(BUS.ax,BUS.y,BUS.az);
+  player.yaw=Math.atan2(-dirx,-dirz);
+  if(player.rig){player.rig.root.visible=true; player.rig.chute.visible=false;}
+  bots.forEach(b=>{
+    b.state="waitbus";
+    // Zeitpunkt entlang der Linie, an dem der Bot springt: dort, wo der Bus
+    // am naechsten an seinem (schon beim Spawn per POI/Stadt-Bias gewaehlten)
+    // Ziel vorbeikommt — genau wie ein Spieler, der beim Ueberflug ueber
+    // "seinen" Ort abspringt. Plus etwas Zufallsstreuung.
+    const abx=BUS.bx-BUS.ax, abz=BUS.bz-BUS.az;
+    const len2=abx*abx+abz*abz||1;
+    let tp=((b.land.x-BUS.ax)*abx+(b.land.z-BUS.az)*abz)/len2;
+    tp=clamp(tp+rnd(-0.06,0.06),0.05,0.95);
+    b.busJumpT=tp;
+  });
+  feed("Battle Bus — Leertaste zum Absprung");
+}
+function makeBusMesh(){
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.BoxGeometry(3.2,2.6,7.5),MAT.metal);
+  g.add(body);
+  const roof=new THREE.Mesh(new THREE.BoxGeometry(2.6,1.2,5.4),M(0x2c3e4a));
+  roof.position.y=1.6; g.add(roof);
+  const balloon=new THREE.Mesh(new THREE.SphereGeometry(2.4,10,8),M(0xd8dde2));
+  balloon.position.y=4.2; g.add(balloon);
+  const wingGeo=new THREE.BoxGeometry(6.4,0.25,1.6);
+  const wingL=new THREE.Mesh(wingGeo,MAT.metal); wingL.position.set(-4.6,0,0); g.add(wingL);
+  const wingR=new THREE.Mesh(wingGeo,MAT.metal); wingR.position.set(4.6,0,0); g.add(wingR);
+  g.traverse(o=>{if(o.isMesh){o.castShadow=false;o.receiveShadow=false;}});
+  return g;
+}
+function busPosAt(frac){
+  return new THREE.Vector3(lerp(BUS.ax,BUS.bx,frac),BUS.y,lerp(BUS.az,BUS.bz,frac));
+}
+function ejectFromBus(pos,yaw){
+  phase="drop"; dropGlide=false; player.vel.set(0,0,0); player.jumped=true;
+  player.pos.copy(pos); player.yaw=yaw;
+  feed("Abgesprungen!"); el("prompt").classList.add("hidden");
+}
+function updateBus(dt){
+  BUS.t+=dt;
+  const frac=clamp(BUS.t/BUS.dur,0,1);
+  const p=busPosAt(frac);
+  const dirx=BUS.bx-BUS.ax, dirz=BUS.bz-BUS.az;
+  const yaw=Math.atan2(-dirx,-dirz);
+  if(BUS.mesh){ BUS.mesh.position.copy(p); BUS.mesh.rotation.y=yaw; }
+  if(!player.jumped){
+    player.pos.copy(p); player.vel.set(0,0,0);
+    if(player.rig){ player.rig.root.position.copy(p); player.rig.root.rotation.y=player.yaw; }
+    const left=Math.max(0,BUS.dur-BUS.t);
+    el("prompt").classList.remove("hidden");
+    el("prompt").innerHTML="<b>Battle Bus</b> — Leertaste/Springen-Knopf zum Absprung ("+Math.ceil(left)+"s)";
+    if(actionDown("jump"))ejectFromBus(p,player.yaw);   // deckt auch den Touch-Sprungknopf ab
+  }
+  for(let i=0;i<bots.length;i++){
+    const b=bots[i]; if(!b.alive||b.state!=="waitbus")continue;
+    if(frac>=b.busJumpT){
+      b.pos.set(p.x+rnd(-2,2),p.y,p.z+rnd(-2,2));
+      b.state="drop"; b.vel.set(0,0,0);
+      if(b.rig)b.rig.root.visible=true;
+    } else if(b.rig){
+      b.rig.root.position.set(p.x,p.y,p.z); b.rig.root.rotation.y=yaw;
+    }
+  }
+  updateHUD();
+  if(frac>=1){
+    // Bus am Ende der Strecke: alle, die noch nicht draussen sind, muessen
+    // jetzt raus (genau wie im Original — man wird notfalls rausgeworfen).
+    if(!player.jumped)ejectFromBus(p,player.yaw);
+    for(let i=0;i<bots.length;i++){ const b=bots[i];
+      if(b.alive&&b.state==="waitbus"){ b.pos.set(p.x+rnd(-2,2),p.y,p.z+rnd(-2,2)); b.state="drop"; b.vel.set(0,0,0); } }
+    if(BUS.mesh){scene.remove(BUS.mesh);BUS.mesh=null;} BUS.active=false;
+  }
+}
+
+/* ======================================================================
    BEWEGUNG
    ====================================================================== */
 const STEP=0.78;            // maximale Stufenhöhe, die man hochlaufen kann
@@ -2935,9 +3095,23 @@ function moveEntity(e,dt,r,h){
   let ny=e.pos.y+e.vel.y*dt, grounded=false;
   const near=nearby(e.pos.x,e.pos.z);
   if(e.vel.y<=0){
+    // WICHTIG (Fix "Bauen wird ab ~3-4 Stockwerken komisch"): der Toleranz-
+    // bereich fuers Einrasten auf einer Plattform war fix STEP+0.05 (~0.83).
+    // Solange man auf ebenem Boden steht, reicht das locker. Aber je hoeher
+    // man in einer engen Wendeltreppen-Spirale baut, desto oefter faellt/
+    // rutscht man kurz mit steigender Geschwindigkeit (z.B. von einer Rampe
+    // ab, ueber die Kante einer Etage) — bei hoher Fallgeschwindigkeit legt
+    // man in einem einzigen dt mehr Strecke zurueck als diese feste Toleranz,
+    // und die duenne Boden-/Treppenstufen-Hitbox wird schlicht uebersprungen
+    // (Tunneling). Der Effekt tritt bei niedrigen, ebenerdigen Bauten kaum auf,
+    // weil man dort selten schnell faellt — aber genau bei mehrstoeckigen
+    // Spiraltreppen (Etage 3/4 aufwaerts) staendig: Spieler fällt kurz durch
+    // die eigene Treppe/den Boden, ruckt zurueck, rutscht, "komisches" Gefuehl.
+    // Fix: Toleranz waechst mit der tatsaechlichen Fallstrecke in diesem Frame.
+    const snapTol=Math.max(STEP+0.05, -e.vel.y*dt+0.06);
     let top=0;
     for(let i=0;i<near.length;i++){const c=near[i]; if(c.noClip)continue;
-      if(overlaps(e.pos.x,ny,e.pos.z,r,h,c)&&c.max.y<=e.pos.y+STEP+0.05&&c.max.y>top)top=c.max.y;}
+      if(overlaps(e.pos.x,ny,e.pos.z,r,h,c)&&c.max.y<=e.pos.y+snapTol&&c.max.y>top)top=c.max.y;}
     if(ny<=top){ny=top;grounded=true;e.vel.y=0;}
     if(ny<=0){ny=0;grounded=true;e.vel.y=0;}
   } else {
@@ -3449,6 +3623,20 @@ function botDrop(b,dt){
   if(d>0.2)b.yaw=Math.atan2(-to.x,-to.z);
   b.pitch=glide?-0.2:-0.9;
   b.vel.set(0,0,0);
+  // WICHTIG: Bots wurden bisher waehrend des Falls/Gleitens NIE ueber animRig
+  // synchronisiert (das passiert normalerweise nur im "loot/fight"-Zweig von
+  // updateBot, der hier oben per früherem return uebersprungen wird). Das Mesh
+  // blieb also an seiner letzten Position (meist noch am Spawnpunkt / unter der
+  // Karte) stehen, waehrend die Logik-Position (b.pos) laengst am Himmel war —
+  // dadurch waren abspringende Bots in der Luft praktisch unsichtbar. Fix:
+  // Rig-Root hier jeden Frame explizit auf b.pos ziehen, inkl. Blickrichtung/
+  // Neigung, damit man Bots am Himmel wieder sieht.
+  if(b.rig){
+    b.rig.root.visible=true;
+    b.rig.root.position.set(b.pos.x,b.pos.y,b.pos.z);
+    b.rig.root.rotation.y=b.yaw;
+    if(b.rig.root.rotation.z)b.rig.root.rotation.z=0;
+  }
 }
 function botBestSlot(b){
   const d=b.target?b.pos.distanceTo(b.target.pos):30;
@@ -3866,6 +4054,7 @@ function botBuildFightStep(b,dt,to){
 
 /* ---------- Haupt-Update ---------- */
 function updateBot(b,dt){
+  if(b.state==="lobby"||b.state==="waitbus")return;   // Prelobby/Bus: Position wird zentral von startLobby/updateBus gesetzt
   if(b.state==="drop"){ botDrop(b,dt); return; }
   b.building=false;
   if(b.pieceShownT>0)b.pieceShownT-=dt;
@@ -3884,6 +4073,23 @@ function updateBot(b,dt){
   if(b.chatT>0)b.chatT-=dt;
   botSee(b,dt);
   if(b.reactT>0)b.reactT-=dt;
+  // Sofort-Oeffnen bei physischer Beruehrung, unabhaengig vom aktuellen
+  // Loot-Ziel/Pfad: vorher wurde eine Truhe nur geoeffnet, wenn der Bot exakt
+  // sein gewaehltes lootGoal erreichte. Blieb die Pfadsuche stecken (z.B. auf
+  // einer anderen Etage/hinter einer Ecke, aber trotzdem in Reichweite) oder
+  // war ein anderer Bot gerade das Ziel eines Kollegen, wurde die Truhe nie
+  // geoeffnet — das war der "manche Bots oeffnen keine Kisten"-Bug. Jetzt: bei
+  // jeder echten Beruehrung (klein genug fuer 3D-Naehe, nicht nur XZ) sofort auf.
+  for(const c of chests){
+    if(c.open)continue;
+    const dx=c.x-b.pos.x, dz=c.z-b.pos.z, dy=(c.y+1.2)-b.pos.y;
+    if(dx*dx+dz*dz<2.6*2.6&&Math.abs(dy)<3.2)openChest(c);
+  }
+  for(const a of ammoBoxes){
+    if(a.open)continue;
+    const dx=a.x-b.pos.x, dz=a.z-b.pos.z;
+    if(dx*dx+dz*dz<2.6*2.6)openAmmoBox(a);
+  }
   const inStorm=outside(b.pos.x,b.pos.z,12);   // schon am Rand rauslaufen, nicht erst im Schaden
   const stormDist=Math.hypot(b.pos.x-storm.cx,b.pos.z-storm.cz)-storm.r;
   const armed=botArmed(b);
@@ -4146,7 +4352,7 @@ function botFight(b,dt){
   const hurtBonus   = b.hurtT>0 ? battleChance*0.55 : 0;
   const duelChance  = clamp(baseChance+heightBonus+hurtBonus,0.06,0.98);
   if(!b.buildUp&&b.buildCD<=0&&b.boxOutT<=0&&los&&dist>8&&dist<80&&!tgtLow&&
-     botMats(b)>=BUILD_COST*5&&built.size<BUILD_LIMIT*0.9&&
+     botMats(b)>=BUILD_COST*2&&built.size<BUILD_LIMIT*0.9&&
      ((endgame&&heightGap>2.2)||Math.random()<duelChance)){
     // Duell: sofort hochbauen und Höhe erkämpfen — Startwinkel exakt zum
     // Gegner ausgerichtet, keine zufaellige Verdrehung.
@@ -4195,8 +4401,10 @@ function botFight(b,dt){
     if(!acted)b.buildCD=rnd(.9,1.9);    // laengere Denkpause statt sofort wieder pruefen
   }
 
-  // Material knapp? Nur farmen, wenn weit weg vom Gegner
-  if(botMats(b)<40&&dist>60){ botHarvest(b,dt); }
+  // Material knapp? Auch im Gefecht mal kurz nachfarmen (vorher erst ab
+  // dist>60, wodurch Bots im Nahkampf praktisch nie Mats nachlegten und so
+  // nie genug fuer Baubattles hatten)
+  if(botMats(b)<80&&dist>30){ botHarvest(b,dt); }
 
   // Schießen — nur auf Entfernungen, die zur Waffe passen (siehe maxEngage oben).
   // Sicherung gegen "starrt nur, schießt aber nicht": je länger der Bot schon
@@ -4308,8 +4516,16 @@ function botIdle(b,dt,stormDist){
   }
 
   /* --- Material farmen (erst wenn bewaffnet) --- */
+  // Vorher durfte NUR hier (in "Looten/Farmen", weit weg vom Gegner) gefarmt
+  // werden — im echten Match verbringen Bots die meiste Zeit aber genau im
+  // Nahkampf/Duell mit einem Gegner in Sichtweite, wo dieser Zweig praktisch
+  // nie lief. Ergebnis: Mats blieben knapp, Baubattle-Schwelle (BUILD_COST*5)
+  // wurde so gut wie nie erreicht -> Bots bauten im Test/Lab (wo Mats fest auf
+  // 999 gesetzt sind) super, im echten Match aber fast nie. Schwelle gesenkt
+  // und Farm-Bedingung gelockert, damit auch im laufenden Gefecht gelegentlich
+  // nachgesammelt wird.
   const mats=botMats(b);
-  const wantMats=mats<(240+320*b.builder)&&stormDist<-14;
+  const wantMats=mats<(280+340*b.builder)&&stormDist<-14;
   if(wantMats){
     if(botHarvest(b,dt))return;
     b.farmScanT-=dt;
@@ -5051,6 +5267,7 @@ addEventListener("keydown",e=>{
   if(e.code===BINDS.pause){if(running&&!paused)setPaused(true);return;}
   keys[e.code]=true;
   if(!running||paused||phase==="spectate")return;
+  if(phase==="bus"||phase==="lobby")return;
   if(EDIT.on){
     if(e.code==="Enter"){ editConfirm(); return; }
     if(e.code==="KeyR"||e.code===BINDS.reload){ editReset(); return; }
@@ -5357,6 +5574,55 @@ function itemLabel(s){
   if(s.kind==="weapon")return s.name;
   return s.name;
 }
+/* ---- Slot-Icons: kleine generierte SVG-Silhouetten pro Item-Kategorie,
+   unten links im Slot, sobald man das Item aufgesammelt hat. Kein
+   Bild-Grafikpack vorhanden, also werden die Icons als Data-URI-SVGs
+   erzeugt und gecacht (einmal pro Item-ID). ---- */
+const ICON_CACHE={};
+function svgIcon(col,paths){
+  return "data:image/svg+xml;utf8,"+encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">'+
+    '<g fill="none" stroke="'+col+'" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">'+paths+'</g></svg>');
+}
+const ICON_SHAPES={
+  pistol:  ()=>svgIcon("#dfe9f2",'<path d="M6 30h20v-8h6v-6H16v-6H10v6H6z"/><path d="M22 30v10h-6v-8"/>'),
+  smg:     ()=>svgIcon("#dfe9f2",'<path d="M4 22h34v6H4z"/><path d="M14 28v10h-6v-8"/><path d="M38 22v-4h6v4"/>'),
+  shotgun: ()=>svgIcon("#dfe9f2",'<path d="M2 20h40v5H2z"/><path d="M42 20l4 2.5-4 2.5"/><path d="M10 25v10H4v-8"/>'),
+  rifle:   ()=>svgIcon("#dfe9f2",'<path d="M2 22h36v5H2z"/><path d="M30 22v-6h8v6"/><path d="M12 27v9H6v-7"/>'),
+  sniper:  ()=>svgIcon("#dfe9f2",'<path d="M2 24h40v4H2z"/><path d="M14 18v6M14 15v3"/><path d="M10 28v8H4v-6"/>'),
+  launcher:()=>svgIcon("#dfe9f2",'<path d="M4 22h30v8H4z"/><circle cx="40" cy="26" r="6"/>'),
+  heavy:   ()=>svgIcon("#dfe9f2",'<path d="M2 20h6v12H2z"/><path d="M8 22h30v8H8z"/><path d="M14 30v8H8v-6"/>'),
+  heal:    ()=>svgIcon("#7ee0a8",'<rect x="10" y="6" width="28" height="36" rx="4"/><path d="M24 14v20M14 24h20"/>'),
+  throw:   ()=>svgIcon("#f2b45a",'<circle cx="24" cy="27" r="14"/><path d="M20 13l4-6 4 6"/>'),
+  fort:    ()=>svgIcon("#9fd3ff",'<rect x="8" y="20" width="32" height="20"/><path d="M8 20l16-14 16 14"/>'),
+  mats:    ()=>svgIcon("#e8c37a",'<path d="M6 34l18-24 18 24z"/>'),
+  pick:    ()=>svgIcon("#dfe9f2",'<path d="M8 40l16-16"/><path d="M18 10c6-4 14-4 20 2s6 14 2 20l-9-9-9-9z"/>')
+};
+function iconCategory(s){
+  if(!s)return null;
+  if(s.kind==="pick")return "pick";
+  if(s.kind==="mats")return "mats";
+  if(s.kind==="fort")return "fort";
+  if(s.kind==="throw")return "throw";
+  if(s.kind==="heal")return "heal";
+  if(s.kind==="weapon"){
+    const mdl=(s.def&&s.def.mdl)||"";
+    if(mdl==="pistol"||mdl==="revolver")return "pistol";
+    if(mdl==="smg")return "smg";
+    if(mdl==="pump"||mdl==="tac")return "shotgun";
+    if(mdl==="bolt"||mdl==="hunting"||mdl.indexOf("sniper")>=0)return "sniper";
+    if(mdl==="rocket"||mdl==="gl")return "launcher";
+    if(mdl==="minigun"||mdl==="lmg")return "heavy";
+    return "rifle";
+  }
+  return null;
+}
+function iconFor(s){
+  if(!s)return null;
+  const cat=iconCategory(s); if(!cat)return null;
+  if(!ICON_CACHE[cat])ICON_CACHE[cat]=ICON_SHAPES[cat]();
+  return ICON_CACHE[cat];
+}
 function updateHUD(){
   el("hpFill").style.width=player.hp+"%"; el("hpTxt").textContent=Math.ceil(player.hp);
   el("shFill").style.width=player.sh+"%"; el("shTxt").textContent=Math.ceil(player.sh);
@@ -5369,7 +5635,7 @@ function updateHUD(){
   const sl=el("slots");
   if(sl.children.length!==6){ sl.innerHTML="";
     for(let i=0;i<6;i++){const d=document.createElement("div");d.className="slot";
-      d.innerHTML='<div class="r"></div><div class="k">'+(i+1)+'</div><div class="q"></div><div class="n"></div>';
+      d.innerHTML='<div class="r"></div><div class="k">'+(i+1)+'</div><div class="q"></div><div class="icon"></div><div class="n"></div>';
       d.addEventListener("pointerdown",ev=>{
         if(editMode||!running)return; ev.preventDefault();
         slotDrag={i:i,x:ev.clientX,y:ev.clientY,moved:false};
@@ -5404,6 +5670,8 @@ function updateHUD(){
     d.querySelector(".n").textContent=itemLabel(s);
     d.querySelector(".q").textContent=s&&s.n>1?"x"+s.n:"";
     d.querySelector(".r").style.background=s&&s.kind==="weapon"?"#"+RAR[s.rar].c.toString(16).padStart(6,"0"):"transparent";
+    const ic=d.querySelector(".icon");
+    if(ic){ const url=iconFor(s); ic.style.backgroundImage=url?"url('"+url+"')":"none"; }
   }
   const a=el("ammo"), w=heldWeapon(player), s=player.slots[player.sel];
   const bb=el("buildBar");
@@ -6414,9 +6682,8 @@ function _startMatchWork(spectate){
     enterSpectate();
     feed("Zuschauer-Modus — "+aliveCount()+" Bots kämpfen um den Sieg");
   } else {
-    phase="drop"; dropGlide=false;
+    startLobby();
     updateHUD(); lock();
-    feed("Match gestartet — "+aliveCount()+" Spieler springen ab");
   }
 }
 function endMatch(win,winnerBot){
@@ -6477,7 +6744,9 @@ function tickError(err){
 function simulate(dt){
   if(running&&!paused){
     if(phase==="lab"){ updateLab(dt); if(LAB.play&&player.alive)updatePlay(dt); updateProjectiles(dt); return; }
-    if(phase==="drop")updateDrop(dt);
+    if(phase==="lobby")updateLobby(dt);
+    else if(phase==="bus")updateBus(dt);
+    else if(phase==="drop")updateDrop(dt);
     // _entDirty wird gezielt bei Tod/Spawn gesetzt (siehe kill()) — hier NICHT
     // mehr pauschal jeden Frame erzwingen, sonst bringt der entityList()-Cache nichts.
     else if(phase==="play")updatePlay(dt);
@@ -6497,7 +6766,7 @@ function simulate(dt){
       if(cpos){ const dx=b.pos.x-cpos.x, dz=b.pos.z-cpos.z, dy=b.pos.y-cpos.y; d2=dx*dx+dy*dy+dz*dz; }
       const far=d2>near2;
       b.lodSkip = d2>hide2*0.36;
-      if(b.rig)b.rig.root.visible = phase==="drop" ? d2<(PERF.renderDist*PERF.renderDist) : d2<hide2;
+      if(b.rig)b.rig.root.visible = (phase==="drop"||phase==="bus"||phase==="lobby") ? d2<(PERF.renderDist*PERF.renderDist) : d2<hide2;
       b.lodAcc=(b.lodAcc||0)+dt;
       // Nahe Bots auf mehrere Frames verteilen, damit nicht alle im selben
       // Bild rechnen — das war die Ursache der Ruckler beim Landen.
@@ -6517,7 +6786,10 @@ function simulate(dt){
         b.lodAcc = far ? -Math.random()*PERF.lodStep*0.9 : -Math.random()*0.03;
       }
     }
-    updateStorm(dt);
+    // Sturm soll erst zu laufen beginnen, sobald tatsaechlich gespielt wird —
+    // sonst frisst die neue Prelobby+Bus-Zeit (~30-60s) bereits einen Teil der
+    // ersten Sturmphase weg, bevor der Spieler ueberhaupt gelandet ist.
+    if(phase!=="lobby"&&phase!=="bus")updateStorm(dt);
     updateProjectiles(dt);
     if(collapseCD>0)collapseCD-=dt;
     if(collapseT>0){collapseT-=dt;if(collapseT<=0&&collapseCD<=0)runCollapse();}
