@@ -180,6 +180,8 @@ canvas{display:block;touch-action:none}
 #specTop{position:fixed;top:14px;left:50%;transform:translateX(-50%);font-family:'Barlow Condensed';
   font-size:26px;background:var(--panel);border:1px solid var(--line);padding:6px 16px;z-index:4;text-align:center}
 #specTop small{display:block;font-size:15px;color:var(--dim);letter-spacing:1px}
+#fpsMeter{position:fixed;left:14px;top:14px;font-family:'Barlow Condensed';font-size:16px;color:#9dfca0;
+  background:rgba(6,10,14,.7);padding:3px 9px;border-radius:5px;z-index:20;letter-spacing:.5px;pointer-events:none}
 #specHud{position:fixed;left:18px;bottom:18px;width:300px;z-index:4;pointer-events:none}
 #specHud .bar{height:15px;background:rgba(6,10,14,.7);border:1px solid rgba(0,0,0,.6);border-radius:8px;
   position:relative;margin-top:6px;box-shadow:inset 0 1px 3px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.06)}
@@ -316,6 +318,7 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
     <div class="chip" id="alive"><small>ÜBRIG</small><strong>20</strong></div>
     <div class="chip" id="killsChip"><small>KILLS</small><span>0</span></div>
   </div>
+  <div id="fpsMeter" class="hidden">FPS --</div>
   <div id="mats">
     <div class="mat sel" data-m="wood"><i style="background:var(--wood)"></i><span>0</span></div>
     <div class="mat" data-m="brick"><i style="background:var(--brick)"></i><span>0</span></div>
@@ -410,6 +413,7 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
         </select>
       </label>
       <label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="optKillHeal" checked style="width:auto"> Heilung pro Kill (+Schild/HP für Bots)</label>
+      <label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="optFps" style="width:auto"> FPS-Anzeige</label>
     </div>
     <button id="btnStart">Match starten</button>
     <button id="btnSpectate" class="ghost" style="background:transparent;color:var(--ink);border:1px solid var(--line);margin-left:12px">Nur zuschauen</button>
@@ -537,6 +541,16 @@ const SENS={v:0.0022};
 // garantiert, dass Match UND Bot-Test-Modus (Lab) immer exakt denselben Wert
 // verwenden, egal wo/wann gerade ins Spiel/Play gewechselt wird.
 function syncSens(){ const n=el("optSens"); if(n)SENS.v=0.0022*(n.value/100); }
+// Zielfernrohre haben je nach Zoomstufe eine eigene Sensitivität, statt alle
+// gleich zu behandeln: starker Zoom (Bolt/Halbautomat, 4x) dreht sich spürbar
+// langsamer als ein leichtes Zielfernrohr-AR (2x) — wie im Original.
+function scopeSensMult(w){
+  if(!w||w.kind!=="weapon"||!player.aiming)return 1;
+  const id=w.def.id;
+  if(id==="bolt"||id==="semisniper")return .38;   // starker Zoom
+  if(w.def.scope)return .55;                       // z.B. scopedar, leichter Zoom
+  return .6;                                        // normales Zielen ohne Scope
+}
 let DIFF=1;
 let KILL_HEAL=true;   // Bots bekommen nach einem Kill +Schild/HP — in den Einstellungen abschaltbar
 const el=id=>document.getElementById(id);
@@ -664,11 +678,17 @@ addEventListener("mousedown",e=>{
    PERFORMANCE — Qualitaetsstufen, dynamische Aufloesung, Chunk-Culling
    ====================================================================== */
 const HWC=(navigator.hardwareConcurrency||4);
-const WEAK_HW = TOUCH || HWC<=4 || /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent||"");
+// deviceMemory (GB RAM, falls vom Browser gemeldet) hilft, echte Low-End-
+// Android-Geraete von starken (z.B. Flaggschiff-Android/iPhone) zu unterscheiden,
+// statt pauschal jedes Touch-/Mobilgeraet auf die niedrigste Stufe zu zwingen.
+const DEV_MEM=(navigator.deviceMemory||4);
+const isMobileUA=/Android|iPhone|iPad|Mobile/i.test(navigator.userAgent||"");
+const WEAK_HW = (TOUCH && (HWC<=4 || DEV_MEM<=3)) || (isMobileUA && (HWC<=4 || DEV_MEM<=3));
+const MID_HW  = !WEAK_HW && (TOUCH||isMobileUA) && (HWC<=6 || DEV_MEM<=6);
 let LOWFX = WEAK_HW;
 const PERF={
   mode:"auto",          // auto | high | med | low
-  level:WEAK_HW?0:2,    // 0 niedrig, 1 mittel, 2 hoch
+  level:WEAK_HW?0:(MID_HW?1:2),    // 0 niedrig, 1 mittel, 2 hoch
   scale:1,              // Aufloesungs-Faktor (dynamisch)
   base:1,               // Basis-PixelRatio der Stufe
   frameMs:16, targetMs:22, adaptT:0,
@@ -693,10 +713,17 @@ function perfApply(){
   if(renderer)renderer.setPixelRatio(PERF.base*PERF.scale);
   if(scene&&scene.fog)scene.fog.density = 1.05/PERF.renderDist;
   if(camera){ camera.far = PERF.renderDist+220; camera.updateProjectionMatrix(); }
+  // Schatten auch zur Laufzeit an/aus schalten (nicht nur beim Start) —
+  // sonst rechnet die GPU nach einem Auto-Downgrade auf "Low" weiter an
+  // Schattenkarten, obwohl LOWFX inzwischen aktiv ist.
+  if(renderer){
+    renderer.shadowMap.enabled = !LOWFX;
+    if(sunLight)sunLight.castShadow = !LOWFX;
+  }
 }
 function perfSetMode(m){
   PERF.mode=m;
-  PERF.level = m==="high"?2 : m==="med"?1 : m==="low"?0 : (WEAK_HW?0:2);
+  PERF.level = m==="high"?2 : m==="med"?1 : m==="low"?0 : (WEAK_HW?0:(MID_HW?1:2));
   PERF.scale = 1;
   perfApply();
 }
@@ -1366,9 +1393,13 @@ function makePOI(cx,cz,seed,type){
     const t=box(7,26,7,cx,0,cz,MAT.wall2); addBox(t,"metal",520);
     addBox(box(9,1.2,9,cx,26,cz,MAT.roof2),"metal",300);
   }
+  // Grössere, bekannte Orte (Stadt/Einkaufszentrum/Lucky Landing) haben in
+  // Fortnite tendenziell besseren Loot als kleine Nebenorte (Werft, Filmrollen) —
+  // hier über einen kleinen Rarität-Bias abgebildet, statt überall gleich.
+  const poiBias=(type==="city"||type==="town"||type==="retail"||type==="lucky")?1:0;
   for(let i=0;i<ri(3,5);i++){
     const a=rnd(0,6.3),d=rnd(5,28);
-    spawnChest(cx+Math.cos(a)*d, cz+Math.sin(a)*d);
+    spawnChest(cx+Math.cos(a)*d, cz+Math.sin(a)*d, poiBias);
   }
   for(let i=0;i<ri(2,4);i++){
     const a=rnd(0,6.3),d=rnd(5,28);
@@ -1460,8 +1491,8 @@ const WEAPONS=[
  {id:"ar",      name:"Sturmgewehr",          dmg:30, rpm:330, mag:30, ammo:"medium", spread:.019,auto:true, rng:170,rl:2.3, mdl:"scar",   cls:4},
  {id:"burst",   name:"Burst-Sturmgewehr",    dmg:27, rpm:240, mag:30, ammo:"medium", spread:.016,auto:true, rng:180,rl:2.4, mdl:"burst",  cls:4, burst:3},
  {id:"suppar",  name:"Schallgedämpftes Sturmgewehr",  dmg:27, rpm:330, mag:30, ammo:"medium", spread:.021,auto:true, rng:150,rl:2.3, mdl:"suppar", cls:4, silent:true},
- {id:"pump",    name:"Pump-Schrotflinte",    dmg:9, pellets:10,rpm:42,mag:5, ammo:"shells",spread:.062,auto:false,rng:40,rl:3.4, mdl:"pump",   cls:5},
- {id:"tac",     name:"Taktische Schrotflinte",dmg:9, pellets:10,rpm:111,mag:8,ammo:"shells",spread:.075,auto:false,rng:34,rl:3.0, mdl:"tac",    cls:4},
+ {id:"pump",    name:"Pump-Schrotflinte",    dmg:20, pellets:10,rpm:42,mag:5, ammo:"shells",spread:.062,auto:false,rng:40,rl:3.4, mdl:"pump",   cls:5},
+ {id:"tac",     name:"Taktische Schrotflinte",dmg:12, pellets:10,rpm:111,mag:8,ammo:"shells",spread:.075,auto:false,rng:34,rl:3.0, mdl:"tac",    cls:4},
  {id:"bolt",    name:"Scharfschützengewehr", dmg:105,rpm:20,  mag:1,  ammo:"heavy",  spread:.002,auto:false,rng:420,rl:2.8, mdl:"bolt",   cls:5, scope:true, proj:"bullet"},
  {id:"hunting", name:"Jagdgewehr",           dmg:86, rpm:48,  mag:1,  ammo:"heavy",  spread:.006,auto:false,rng:300,rl:1.9, mdl:"hunting",cls:4, proj:"bullet"},
  {id:"rocket",  name:"Raketenwerfer",        dmg:110,rpm:34,  mag:1,  ammo:"rocket", spread:.004,auto:false,rng:400,rl:3.2, mdl:"rocket", cls:5, proj:"rocket"},
@@ -1809,8 +1840,8 @@ function animRig(e,dt){
    ====================================================================== */
 const PIECES=["wall","ramp","floor","roof"];
 const PIECE_NAME={wall:"Wand",ramp:"Rampe",floor:"Boden",roof:"Dach"};
-const MATHP={wood:150,brick:280,metal:460};
-const MATFULL={wood:150,brick:280,metal:460};
+const MATHP={wood:150,brick:200,metal:500};
+const MATFULL={wood:150,brick:200,metal:500};
 const built=new Map();     // key -> {grp,cols,type,cx,cy,cz,axis,mat,hp}
 const BUILD_COST=10;
 const BUILD_LIMIT=IS_IOS?220:560;     // Obergrenze fuer gleichzeitig stehende Bauteile
@@ -2475,20 +2506,28 @@ function sndGun(def,vol,far){
 }
 function sndHit(head){
   if(!audioInit())return;
-  if(head){ tone(1600,950,.09,"square",.22); tone(2500,1650,.07,"triangle",.13,.02); noiseHit(.05,.10,"highpass",3500,1,0); }
-  else tone(1100,700,.05,"square",.15);
+  // OG-Trefferklang: heller, sehr kurzer "Ding" bei Kopftreffer (deutlich höher
+  // und knackiger als Körpertreffer), dumpferer Klick bei Körpertreffer.
+  if(head){ tone(2100,1500,.07,"square",.24); tone(3100,2400,.05,"triangle",.14,.015); noiseHit(.04,.09,"highpass",4000,1,0); }
+  else tone(1150,780,.045,"square",.16);
 }
-function sndShieldBreak(){ tone(950,300,.26,"sawtooth",.19); noiseHit(.26,.2,"bandpass",2600,2,.4); }
+function sndShieldBreak(){
+  // Schild zerbricht wie Glas: heller Ton + knackendes Rauschen, kein weicher Sawtooth
+  tone(1100,320,.20,"sawtooth",.20); noiseHit(.22,.24,"highpass",2800,1.4,.45); noiseHit(.30,.14,"bandpass",1600,2,.5,.03);
+}
 function sndKill(){
-  [0,.09,.18].forEach((d,i)=>tone([660,880,1320][i],[660,880,1320][i],.14,"triangle",.17,d,.5));
-  noiseHit(.3,.12,"highpass",3000,1,.5,.18);
+  // Klassischer 3-Ton "Elimination bestätigt"-Jingle: schneller, heller, perkussiver
+  [0,.075,.15].forEach((d,i)=>tone([784,988,1319][i],[784,988,1319][i],.11,"triangle",.19,d,.5));
+  noiseHit(.28,.13,"highpass",3200,1,.5,.15);
 }
 function sndVictory(){
   [523,659,784,1047,1319].forEach((f,i)=>tone(f,f,.42,"triangle",.17,i*.13,.7));
 }
 function sndChest(){
-  const notes=[784,988,1175,1568,1976];
-  notes.forEach((f,i)=>{ tone(f,f,.34,"sine",.15,i*.055,.55); tone(f*2,f*2,.16,"triangle",.05,i*.055+.01,.4); });
+  // Klassisches aufsteigendes 5-Ton-Arpeggio wie beim originalen Truhen-Sound,
+  // mit etwas mehr Abstand zwischen den Tönen fuer den wiedererkennbaren Rhythmus.
+  const notes=[659,784,988,1319,1568];
+  notes.forEach((f,i)=>{ tone(f,f,.36,"sine",.16,i*.075,.55); tone(f*2,f*2,.17,"triangle",.05,i*.075+.01,.4); });
 }
 function sndChestAt(pos){
   const v=distVol(pos,70); if(v<=.05)return;
@@ -2523,14 +2562,37 @@ function sndHeal(id){
 }
 /* Schritte: materialabhängig etwas verschieden, 3D-Lautstärke für alle außer
    den eigenen. Fortnite-typisch: dumpfer Tritt + leises Klack-Obertongeräusch. */
+// Material unter den Füßen bestimmen: gebaute Bauteile klingen je nach
+// Material klar unterscheidbar (wie im Original), sonst dumpfer Boden/Gras-Schritt.
+function surfaceMatAt(x,z){
+  const near=nearby(x,z);
+  for(let i=0;i<near.length;i++){
+    const c=near[i];
+    if(c.buildRec&&(c.buildRec.type==="floor"||c.buildRec.type==="ramp"))return c.buildRec.mat;
+  }
+  return "ground";
+}
+function stepTone(mat,hard,v){
+  v=v===undefined?1:v;
+  if(mat==="wood"){        // hohler Holzboden: kurzer heller Klopfton + weiches Rauschen
+    noiseHit(.055,(hard?.10:.055)*v,"bandpass",900,1.3,.08);
+    tone(220,140,.05,"triangle",.09*v);
+  } else if(mat==="metal"){ // Metall: heller, klirrender Antritt
+    noiseHit(.045,(hard?.10:.05)*v,"highpass",2600,1.5,.08);
+    tone(560,380,.04,"square",.07*v);
+  } else if(mat==="brick"){ // Ziegel/Beton: härter, kurzer Klack
+    noiseHit(.05,(hard?.11:.055)*v,"bandpass",1400,1.2,.08);
+  } else {                  // Erde/Gras (Standardboden): dumpfer, weicher Tritt
+    noiseHit(.06,(hard?.11:.06)*v,"lowpass",hard?560:400,1,.08);
+    noiseHit(.03,(hard?.05:.03)*v,"bandpass",1800,1.5,.04);
+  }
+}
 function sndStep(hard){
-  noiseHit(.06,hard?.11:.06,"lowpass",hard?560:400,1,.08);
-  noiseHit(.03,hard?.05:.03,"bandpass",1800,1.5,.04);
+  stepTone(surfaceMatAt(player.pos.x,player.pos.z),hard);
 }
 function sndStepAt(pos,hard){
   const v=distVol(pos,42); if(v<=.03)return;         // Schritte sind nur in der Nähe hörbar
-  noiseHit(.06,(hard?.11:.06)*v,"lowpass",hard?560:400,1,.10);
-  noiseHit(.03,(hard?.05:.03)*v,"bandpass",1800,1.5,.05);
+  stepTone(surfaceMatAt(pos.x,pos.z),hard,v);
 }
 function sndLand(v){ noiseHit(.05,clamp(v/22,.06,.22),"highpass",1600,1,0); noiseHit(.18,clamp(v/26,.09,.32),"lowpass",280,1,.25); tone(85,42,.17,"sine",.19); }
 function sndLandAt(pos,v){
@@ -2560,8 +2622,8 @@ function sndExplodeAt(pos){
   noiseHit(1.1,.22*v,"lowpass",400,1,1.0,.06);
 }
 function sndStormTick(){ tone(180,120,.22,"sawtooth",.13); noiseHit(.3,.1,"bandpass",500,1,.4); }
-function sndZoneClose(){        // Sturm beginnt zu schließen — dringliche Sirene, ähnlich dem OG-Warnsignal
-  for(let i=0;i<3;i++) tone(520,780,.28,"sawtooth",.12,i*.32,.5);
+function sndZoneClose(){        // Sturm beginnt zu schließen — alternierende Zweiton-Sirene wie im Original
+  [560,720,560,720].forEach((f,i)=>tone(f,f,.24,"sawtooth",.12,i*.22,.5));
   noiseHit(.6,.10,"bandpass",900,1.4,.4,.05);
 }
 function sndZoneStable(){       // neuer Sturmkreis steht — ruhiger, kurzer Doppelklang
@@ -2694,7 +2756,7 @@ function spawnGroundLoot(x,z){
   else if(r<.78)spawnFloor(ammoLoot(12,30),x,z);
   else spawnFloor(randomConsumable(),x,z);
 }
-function spawnChest(x,z){
+function spawnChest(x,z,bias){
   const g=new THREE.Group();
   const b=new THREE.Mesh(BOX,MAT.chest); b.scale.set(1.3,.7,.9); b.position.y=.35; g.add(b);
   const lid=new THREE.Mesh(BOX,M(0xd9a83c)); lid.scale.set(1.34,.22,.94); lid.position.y=.78; g.add(lid);
@@ -2702,7 +2764,7 @@ function spawnChest(x,z){
     new THREE.MeshBasicMaterial({color:0xf2c14e,transparent:true,opacity:.13,depthWrite:false,side:THREE.DoubleSide}));
   glow.position.y=3.0; g.add(glow); g.userData.glow=glow;
   g.position.set(x,0,z); staticAdd(g);
-  chests.push({mesh:g,lid:lid,x:x,z:z,y:0,open:false});
+  chests.push({mesh:g,lid:lid,x:x,z:z,y:0,open:false,bias:bias||0});
 }
 function spawnAmmoBox(x,z){
   const g=new THREE.Group();
@@ -2715,8 +2777,9 @@ function openChest(c){
   c.open=true; c.lid.rotation.x=-1.2; c.lid.position.set(0,.95,-.45);
   if(c.mesh.userData.glow)c.mesh.userData.glow.visible=false;
   const n=ri(2,3);
-  spawnFloor(randomWeapon(1),c.x+rnd(-1.6,1.6),c.z+rnd(-1.6,1.6),c.y);
-  if(Math.random()<.7)spawnFloor(randomWeapon(0),c.x+rnd(-1.6,1.6),c.z+rnd(-1.6,1.6),c.y);
+  const cb=c.bias||0;   // 0 = normale Truhe, höher = wichtiger POI -> bessere Chancen
+  spawnFloor(randomWeapon(1+cb),c.x+rnd(-1.6,1.6),c.z+rnd(-1.6,1.6),c.y);
+  if(Math.random()<.7)spawnFloor(randomWeapon(cb),c.x+rnd(-1.6,1.6),c.z+rnd(-1.6,1.6),c.y);
   for(let i=0;i<n;i++){
     if(Math.random()<.55)spawnFloor(ammoLoot(18,36),c.x+rnd(-2,2),c.z+rnd(-2,2),c.y);
     else spawnFloor(randomConsumable(),c.x+rnd(-2,2),c.z+rnd(-2,2),c.y);
@@ -4130,7 +4193,7 @@ function botFight(b,dt){
   // geforderte Zielgenauigkeit — genau wie ein Mensch, der irgendwann auch
   // ungenau feuert statt ewig nachzuzielen.
   b.noFireT=los?( (b.noFireT||0)+dt ):0;
-  const fireTol=(0.12+(1-b.skill)*0.2)+clamp((b.noFireT-0.6)*0.12,0,0.35)+(tgtLow?0.15:0);
+  const fireTol=(0.10+(1-b.skill)*0.30)+clamp((b.noFireT-0.6)*0.12,0,0.35)+(tgtLow?0.15:0);
   if((los||wallHit)&&b.reactT<=0&&b.cool<=0&&b.reloading<=0&&dist<maxEngage&&aimErr<fireTol){
     const ap=wallHit?aimAt:botAimPoint(b,tgt.pos,dist,tgt,w.def.proj==="bullet"?320:0);
     if(shootWeapon(b,ap)){
@@ -4811,6 +4874,10 @@ function updatePlay(dt){
 
   player.sprint=(actionDown("sprint")||Math.hypot(touchMove.x,touchMove.y)>0.85)&&!player.aiming;
   let sp=player.using?1.6:player.sprint?8.4:player.aiming?3.6:6.2;
+  // Minigun: wie im Original bremst das Hochlaufen/Feuern der Minigun den Spieler stark ab
+  if(heldWeapon(player)&&heldWeapon(player).def.spin&&player.spin>0.05){
+    player.sprint=false; sp=Math.min(sp,2.3);
+  }
   player.vel.x=move.x*sp; player.vel.z=move.z*sp;
   if(actionDown("jump")&&player.onGround&&!player.using){player.vel.y=9.3;player.onGround=false;sndJump();}
   const wasAir=!player.onGround, vy=player.vel.y;
@@ -4991,7 +5058,7 @@ addEventListener("wheel",e=>{
 },{passive:true});
 addEventListener("mousemove",e=>{
   if(document.pointerLockElement!==renderer.domElement)return;
-  const s=SENS.v*(player.aiming?.6:1);
+  const s=SENS.v*scopeSensMult(heldWeapon(player));
   player.yaw-=e.movementX*s; player.pitch-=e.movementY*s;
   player.pitch=clamp(player.pitch,-1.35,1.25);
 });
@@ -5210,7 +5277,7 @@ function initTouch(){
       st.firstElementChild.style.transform="translate("+dx+"px,"+dy+"px)";
       touchMove.x=dx/max; touchMove.y=-dy/max;
     } else if(e.pointerId===lookId){
-      const s=SENS.v*1.35*(player.aiming?.6:1);
+      const s=SENS.v*1.35*scopeSensMult(heldWeapon(player));
       player.yaw-=(e.clientX-lookX)*s; player.pitch-=(e.clientY-lookY)*s;
       player.pitch=clamp(player.pitch,-1.35,1.25);
       lookX=e.clientX; lookY=e.clientY;
@@ -5444,7 +5511,7 @@ function updateSpectate(dt){
     bb.classList.add("hidden");
   }
 
-  el("specTop").innerHTML=t.name+" &nbsp;·&nbsp; "+t.kills+" Kills";
+  el("specTop").innerHTML=t.name+" &nbsp;·&nbsp; "+t.kills+" Kills &nbsp;·&nbsp; Sturmkreis "+(storm.phase+1);
   el("specName").textContent=t.name;
   el("alive").querySelector("strong").textContent=a.length;
   drawMapFor(t);
@@ -5491,10 +5558,10 @@ function exitSpectateUI(){
    durchsichtige Bauteile und ein Bau-Log mit Fehlergruenden.
    ====================================================================== */
 const LAB_LEVELS={
-  "0":{name:"Locker",skill:.30,sensi:.38},
-  "1":{name:"Normal",skill:.60,sensi:.50},
-  "2":{name:"Hart",  skill:.90,sensi:.60},
-  "3":{name:"Profi", skill:1.15,sensi:.72}
+  "0":{name:"Locker",skill:.20,sensi:.32},
+  "1":{name:"Normal",skill:.55,sensi:.50},
+  "2":{name:"Hart",  skill:.92,sensi:.62},
+  "3":{name:"Profi", skill:1.30,sensi:.78}
 };
 const LAB_MATNAME={all:"Alle (voll)",wood:"Holz",brick:"Stein",metal:"Metall"};
 // HUD-Elemente des normalen Matches, die im Labor stoeren wuerden
@@ -6342,12 +6409,20 @@ function tick(){
   const dt=Math.min(clock.getDelta(),.05);
   GDT=dt;   // fuer zeitbasierte Effekte wie die Minigun-Anlaufzeit
   perfAdapt(dt);
+  updateFpsMeter(dt);
   try{ simulate(phase==="lab"?labStepDt(dt):dt); }
   catch(err){ tickError(err); }        // niemals den Frame abbrechen -> kein Standbild
   try{ drawFrame(dt); }
   catch(err){ tickError(err); }
   try{ renderer.render(scene,camera); }   // gerendert wird IMMER
   catch(err){ tickError(err); }
+}
+let _fpsT=0,_fpsSm=60;
+function updateFpsMeter(dt){
+  const m=el("fpsMeter"); if(!m||m.classList.contains("hidden"))return;
+  _fpsSm=_fpsSm*0.9+(dt>0?1/dt:60)*0.1;
+  _fpsT-=dt; if(_fpsT>0)return; _fpsT=0.25;
+  m.textContent="FPS "+Math.round(_fpsSm)+" · Stufe "+(["Niedrig","Mittel","Hoch"][PERF.level]||"?");
 }
 let _errCount=0;
 function tickError(err){
@@ -6458,18 +6533,21 @@ function wireMenu(){
     if(prefs.ctrl&&el("optCtrl"))el("optCtrl").value=prefs.ctrl;
     if(prefs.qual&&el("optQual"))el("optQual").value=prefs.qual;
     if(prefs.killHeal!==undefined&&el("optKillHeal"))el("optKillHeal").checked=prefs.killHeal;
+    if(prefs.fps!==undefined&&el("optFps")){ el("optFps").checked=prefs.fps; el("fpsMeter").classList.toggle("hidden",!prefs.fps); }
   }catch(e){}
   function savePrefs(){
     try{ localStorage.setItem("sf_prefs",JSON.stringify({
       bots:el("optBots").value, diff:el("optDiff").value,
       sens:el("optSens").value, qual:el("optQual")?el("optQual").value:"auto",
       ctrl:el("optCtrl")?el("optCtrl").value:"old",
-      killHeal:el("optKillHeal")?el("optKillHeal").checked:true
+      killHeal:el("optKillHeal")?el("optKillHeal").checked:true,
+      fps:el("optFps")?el("optFps").checked:false
     })); }catch(e){}
   }
-  ["optBots","optDiff","optSens","optQual","optKillHeal"].forEach(id=>{
+  ["optBots","optDiff","optSens","optQual","optKillHeal","optFps"].forEach(id=>{
     const n=el(id); if(n)n.addEventListener("change",savePrefs);
   });
+  if(el("optFps"))el("optFps").addEventListener("change",e=>el("fpsMeter").classList.toggle("hidden",!e.target.checked));
   el("optSens").addEventListener("input",syncSens);
   if(el("optCtrl")){
     el("optCtrl").value=CTRL_SCHEME;
